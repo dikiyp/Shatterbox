@@ -138,6 +138,12 @@ pub struct DebrisPiece {
     /// Speed of the previous fixed step, m/s. A large drop means the piece hit
     /// something and deposits its energy there (see `step`).
     last_speed: f32,
+    /// Seconds since the body spawned. Jolt reports freshly spawned debris as
+    /// asleep until the first solver wake-up, and `bake_sleeping` used to trust
+    /// that flag — a big blast therefore froze its own rubble into the world on
+    /// the next frame. Age gates every bake path: rubble stays a real body (and
+    /// can be hit again) for at least [`DestructionSystem::MIN_BAKE_AGE`].
+    pub age: f32,
 }
 
 impl DebrisPiece {
@@ -279,6 +285,16 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
     /// 0.6 s was baked into the world on the next frame, and the floor-quantised
     /// pose read as a one-frame twitch. 1.2 s lets the contact solver finish.
     pub const SETTLE_SECONDS: f32 = 1.2;
+    /// Minimum time a piece must exist before it may bake back into the world.
+    /// A blast pushes pieces out over several frames; without this gate the
+    /// first solver tick that reports `sleeping` (or the live-budget retire
+    /// path) froze pieces that had not even left the crater yet, so a heavily
+    /// destroyed map turned back into static geometry almost immediately.
+    pub const MIN_BAKE_AGE: f32 = 2.5;
+    /// The live-body budget must not be satisfied by baking pieces that are
+    /// still flying. Older rubble is retired first; fresh pieces may exceed the
+    /// budget for a moment, which the renderer's instance cap already handles.
+    pub const MIN_RETIRE_AGE: f32 = 1.5;
 
     pub fn physics(&self) -> &B {
         &self.physics
@@ -388,6 +404,12 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
                 index += 1;
                 continue;
             };
+            // Spawned this blast and still flying (or not yet woken by the
+            // solver): never bake, even if Jolt reports it asleep.
+            if piece.age < Self::MIN_BAKE_AGE {
+                index += 1;
+                continue;
+            }
             if state.awake && !state.sleeping {
                 // Jolt keeps a resting pile awake; the settle timer is what
                 // actually decides "this chip is done".
@@ -522,6 +544,7 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
         let mut order: Vec<(f32, BodyHandle)> = self
             .pieces
             .iter()
+            .filter(|piece| piece.age >= Self::MIN_RETIRE_AGE)
             .map(|piece| (piece.position.distance_squared(player), piece.handle))
             .collect();
         order.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -583,6 +606,7 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
                 hits.push((piece.position, piece.last_speed));
             }
             piece.last_speed = speed;
+            piece.age += dt.max(0.0);
             if dt <= 0.0 || !self.settle {
                 piece.rest_time = 0.0;
                 continue;
@@ -723,7 +747,7 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
         seed: u32,
         profile: ImpactProfile,
     ) -> FireResult {
-        let radius = radius_voxels.clamp(4, 20);
+        let radius = radius_voxels.clamp(4, 32);
         let center = (point / VOXEL_SIZE_M).floor().as_ivec3();
         let command = VoxelCommand::remove(
             u64::from(self.sequence),
@@ -747,7 +771,7 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
             let angle = sample(2 + lobe as u32) * std::f32::consts::TAU;
             // Lobes reach well outside the main sphere: with offsets capped at
             // the radius the union of spheres stayed visually circular.
-            let reach = radius as f32 * (0.55 + 0.75 * sample(8 + lobe as u32));
+            let reach = radius as f32 * (0.45 + 0.55 * sample(8 + lobe as u32));
             let lift = (sample(14 + lobe as u32) - 0.35) * reach * 0.8;
             let offset = IVec3::new(
                 (angle.cos() * reach) as i32,
@@ -1266,6 +1290,7 @@ impl<B: PhysicsBackend> DestructionSystem<B> {
                     rotation: Quat::IDENTITY,
                     rest_time: 0.0,
                     last_speed: 0.0,
+                    age: 0.0,
                 });
                 sizes.push(build.voxel_count);
             } else {
@@ -2625,6 +2650,8 @@ mod tests {
 
         // FakePhysics reports every body as asleep, so this call must bake all
         // of them. The player stands far away, so nothing blocks the bake.
+        // Rubble is protected for MIN_BAKE_AGE, so age it first.
+        destruction.step(DestructionSystem::<FakePhysics>::MIN_BAKE_AGE + 0.1);
         let bake = destruction.bake_sleeping(&mut world, Vec3::splat(-50.0), 64);
         assert_eq!(bake.pieces, result.pieces);
         assert!(bake.voxels > 0);
@@ -2672,7 +2699,9 @@ mod tests {
         assert_eq!(destruction.pieces().len(), spawned);
 
         // Back at the wall with a smaller budget: the farthest pieces bake into
-        // the world, and the world + bodies total is unchanged.
+        // the world, and the world + bodies total is unchanged. Fresh rubble is
+        // exempt from retirement, so age it past MIN_RETIRE_AGE first.
+        destruction.step(DestructionSystem::<FakePhysics>::MIN_RETIRE_AGE + 0.1);
         let bake = destruction.retire_into_world(&mut world, Vec3::splat(0.0), 2);
         assert!(bake.pieces > 0, "the budget must retire something");
         assert_eq!(destruction.pieces().len(), 2);
