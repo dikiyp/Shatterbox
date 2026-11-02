@@ -1,0 +1,17 @@
+// fx_lab / DDGI steady-state budget probe.
+//
+// No screenshots: the harness capture stalls the GPU for tens of milliseconds
+// per shot, which contaminates the per-pass timestamp p50 on a 900-frame run.
+// This scenario holds one camera for 600 frames so the DDGI passes are measured
+// on undisturbed frames. Run with SHATTERBOX_EFFECTS=2167 and
+// SHATTERBOX_GI=off|low|medium|high.
+Scenario(
+    name: "ddgi_bench",
+    scene: Some("fx_lab"),
+    steps: [
+        TimeOfDay(hours: 12.0),
+        Camera(pos: (105.0, 2.0, 104.0), yaw: -1.5708, pitch: -0.55),
+        Wait(frames: 600),
+        Exit,
+    ],
+)
