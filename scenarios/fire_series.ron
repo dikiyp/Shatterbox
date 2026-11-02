@@ -1,0 +1,29 @@
+// Five hitscan shots at the same spot on the free-standing wall. Exercises the
+// destruction budget: each shot must produce debris, the world hash must stay
+// consistent and nothing may be lost between the crater and the bodies.
+Scenario(
+    name: "fire_series",
+    scene: Some("studio"),
+    steps: [
+        Camera(pos: (148.0, 3.2, 162.0), yaw: 3.1415927, pitch: -0.05),
+        Wait(frames: 10),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "series_before"),
+        Fire(weapon: shot),
+        Wait(frames: 15),
+        Fire(weapon: shot),
+        Wait(frames: 15),
+        Fire(weapon: shot),
+        Wait(frames: 15),
+        Fire(weapon: shot),
+        Wait(frames: 15),
+        Fire(weapon: shot),
+        Wait(frames: 30),
+        Screenshot(name: "series_after"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Wait(frames: 120),
+        Screenshot(name: "series_settled"),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

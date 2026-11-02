@@ -1,0 +1,24 @@
+// Weapon selector: all three slots are reachable from the harness and the
+// active one is drawn in the bottom strip.
+Scenario(
+    name: "weapon_switch",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (126.0, 3.2, 141.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 15),
+        Select(slot: 1),
+        Wait(frames: 2),
+        Screenshot(name: "weapon_bazooka"),
+        Select(slot: 2),
+        Wait(frames: 2),
+        Screenshot(name: "weapon_carbine"),
+        Select(slot: 3),
+        Wait(frames: 2),
+        Screenshot(name: "weapon_fill"),
+        Select(slot: 2),
+        Fire(weapon: carbine),
+        Wait(frames: 10),
+        Screenshot(name: "weapon_carbine_shot"),
+        Exit,
+    ],
+)

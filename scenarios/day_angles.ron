@@ -1,0 +1,24 @@
+// Diagnostic: find a bright-day camera that shows the sun/shadow volume.
+Scenario(
+    name: "day_angles",
+    scene: Some("house"),
+    steps: [
+        TimeOfDay(hours: 12.0),
+        Effects(bits: 123),
+        Wait(frames: 40),
+        Camera(pos: (126.0, 4.0, 120.0), yaw: 3.14159, pitch: -0.06),
+        Wait(frames: 30),
+        Screenshot(name: "north"),
+        Camera(pos: (145.0, 4.0, 133.0), yaw: -1.5708, pitch: -0.06),
+        Wait(frames: 20),
+        Screenshot(name: "east"),
+        Camera(pos: (118.0, 4.0, 118.0), yaw: 2.35619, pitch: -0.06),
+        Wait(frames: 20),
+        Screenshot(name: "northwest"),
+        Camera(pos: (145.0, 4.0, 120.0), yaw: -2.35619, pitch: -0.06),
+        Wait(frames: 20),
+        Screenshot(name: "northeast"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

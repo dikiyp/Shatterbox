@@ -1,0 +1,50 @@
+// Smoke sequence: one rocket into the house wall, then one carbine round, with
+// captures at 0.2 / 0.5 / 1 / 2 / 4 / 8 s after each shot (60 Hz => 12 / 30 /
+// 60 / 120 / 240 / 480 frames). Same frames as the previous smoke version, so
+// the two can be diffed directly. `report.json` carries the live/peak puff
+// counts (`physics.smoke_particles`, `physics.smoke_peak`) and the billboard +
+// composite cost (`gpu_ms.particles`).
+Scenario(
+    name: "smoke_sequence",
+    scene: Some("house"),
+    steps: [
+        // ---- rocket: dense fireball, rising column, settling dust --------
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Select(slot: 1),
+        Wait(frames: 40),
+        Fire(weapon: rocket),
+        Wait(frames: 12),
+        Screenshot(name: "rocket_0_2s"),
+        Wait(frames: 18),
+        Screenshot(name: "rocket_0_5s"),
+        Wait(frames: 30),
+        Screenshot(name: "rocket_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "rocket_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "rocket_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "rocket_8s"),
+
+        // ---- carbine: small impact, much weaker and shorter-lived --------
+        Camera(pos: (123.5, 3.0, 139.0), yaw: 0.0, pitch: 0.0),
+        Select(slot: 2),
+        Wait(frames: 30),
+        Fire(weapon: carbine),
+        Wait(frames: 12),
+        Screenshot(name: "carbine_0_2s"),
+        Wait(frames: 18),
+        Screenshot(name: "carbine_0_5s"),
+        Wait(frames: 30),
+        Screenshot(name: "carbine_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "carbine_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "carbine_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "carbine_8s"),
+
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

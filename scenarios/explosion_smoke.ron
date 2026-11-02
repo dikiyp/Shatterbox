@@ -1,0 +1,25 @@
+// Smoke / dust check for a bazooka blast: the cloud has to be visible in the
+// frame right after detonation, thicken while the flash fades, and disperse
+// without leaving a grey film. Deterministic: the same scenario run twice must
+// produce byte-identical frames (puffs are hashed from the blast seed).
+Scenario(
+    name: "explosion_smoke",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 20),
+        Screenshot(name: "smoke_before"),
+        Fire(weapon: rocket),
+        Wait(frames: 16),
+        Screenshot(name: "smoke_flash"),
+        Wait(frames: 14),
+        Screenshot(name: "smoke_puff"),
+        Wait(frames: 30),
+        Screenshot(name: "smoke_rise"),
+        Wait(frames: 120),
+        Screenshot(name: "smoke_gone"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

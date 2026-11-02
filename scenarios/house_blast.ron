@@ -1,0 +1,22 @@
+// House scene: fire one rocket into the south-west corner column and capture
+// before / at the blast / two seconds later. The startup assert proves the
+// building is grounded before anything is destroyed.
+Scenario(
+    name: "house_blast",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (118.0, 3.5, 140.0), yaw: 0.519, pitch: -0.062),
+        Wait(frames: 20),
+        Screenshot(name: "house_before"),
+        Assert(check: no_floating, tolerance: None),
+        Assert(check: voxel_conservation, tolerance: None),
+        Fire(weapon: rocket),
+        Wait(frames: 15),
+        Screenshot(name: "house_blast"),
+        Wait(frames: 120),
+        Screenshot(name: "house_settled"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

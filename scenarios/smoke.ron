@@ -1,0 +1,18 @@
+// Minimal autotest: load the arena, let the first frames settle, take one
+// screenshot and verify that the rendered depth under the crosshair agrees with
+// the CPU voxel raycast.
+//
+// RON note: `tolerance` is an Option, so it is written explicitly as
+// `Some(x)` or `None`.
+Scenario(
+    name: "smoke",
+    scene: Some("studio"),
+    steps: [
+        Camera(pos: (128.0, 10.0, 180.0), yaw: 0.0, pitch: -0.12),
+        Wait(frames: 30),
+        Screenshot(name: "smoke_overview"),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

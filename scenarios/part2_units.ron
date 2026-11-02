@@ -1,0 +1,43 @@
+// Part 2 check: weapons are impact profiles, not one generic blast.
+//
+// Five carbine rounds into the brick wall must only chip it (chips drop out of
+// the hole, no radial throw), then one rocket must blow a real crater and throw
+// the rubble much harder. `report.json` carries the per-profile average and
+// maximum initial speed plus the piece-size histogram, and the conservation
+// assert counts world + bodies + dust.
+Scenario(
+    name: "part2_units",
+    scene: Some("house"),
+    steps: [
+        // Same vantage as `house_blast_perf`: the whole facade is in frame, so
+        // the carbine chips and the rocket crater are both visible.
+        //
+        // The carbine aims off-centre on purpose: five rounds at the same spot
+        // drill clean through the 0.5 m wall, and a rocket fired along that line
+        // would fly through the hole and detonate inside the house. Yaw 0.3 puts
+        // the bullet hole ~3 m to the right, outside the rocket's crater.
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.3, pitch: 0.0),
+        Wait(frames: 60),
+        Screenshot(name: "units_before"),
+        Select(slot: 2),
+        Fire(weapon: carbine),
+        Wait(frames: 7),
+        Fire(weapon: carbine),
+        Wait(frames: 7),
+        Fire(weapon: carbine),
+        Wait(frames: 7),
+        Fire(weapon: carbine),
+        Wait(frames: 7),
+        Fire(weapon: carbine),
+        Wait(frames: 60),
+        Screenshot(name: "units_carbine"),
+        // Straight at the facade for the rocket.
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 10),
+        Fire(weapon: rocket),
+        Wait(frames: 600),
+        Screenshot(name: "units_rocket"),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

@@ -1,0 +1,28 @@
+// Interior lighting check: stand inside the house, look at walls that face away
+// from the sun, and at the ceiling. Any direct sun or lamp light on these
+// surfaces that comes through a wall is a leak.
+Scenario(
+    name: "house_interior",
+    scene: Some("house"),
+    steps: [
+        // Ground floor, looking at the inner face of the south wall.
+        Camera(pos: (126.0, 3.0, 128.0), yaw: 3.1416, pitch: 0.05),
+        TimeOfDay(hours: 10.5),
+        Wait(frames: 20),
+        Screenshot(name: "interior_south_noon"),
+        // Same view at night: only the ceiling lamps remain.
+        TimeOfDay(hours: 22.0),
+        Wait(frames: 10),
+        Screenshot(name: "interior_south_night"),
+        // Look up at the ceiling slab.
+        Camera(pos: (126.0, 3.0, 128.0), yaw: 3.1416, pitch: 1.35),
+        Wait(frames: 10),
+        Screenshot(name: "interior_ceiling_night"),
+        // Upper floor, looking at the inner face of the north wall.
+        Camera(pos: (130.0, 5.6, 130.0), yaw: 0.0, pitch: 0.0),
+        TimeOfDay(hours: 10.5),
+        Wait(frames: 10),
+        Screenshot(name: "upper_north_noon"),
+        Exit,
+    ],
+)

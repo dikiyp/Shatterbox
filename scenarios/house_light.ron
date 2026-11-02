@@ -1,0 +1,20 @@
+// Daylight regression for light tightness: the facade must be lit only by the
+// sun, and the interior only through the openings. Run with default effects and
+// with `--effects 9` (shadows + VCT) to compare the probe contribution.
+Scenario(
+    name: "house_light",
+    scene: Some("house"),
+    steps: [
+        TimeOfDay(hours: 10.5),
+        Camera(pos: (126.0, 3.5, 140.0), yaw: 0.0, pitch: -0.05),
+        Wait(frames: 20),
+        Screenshot(name: "house_day_outside"),
+        Camera(pos: (126.0, 2.5, 131.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 8),
+        Screenshot(name: "house_day_inside"),
+        Camera(pos: (126.0, 6.0, 130.0), yaw: 0.0, pitch: -0.15),
+        Wait(frames: 8),
+        Screenshot(name: "house_day_upper"),
+        Exit,
+    ],
+)

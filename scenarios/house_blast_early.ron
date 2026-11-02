@@ -1,0 +1,16 @@
+// Part 1 diagnostic: does the two-voxel loss happen at the blast itself, or
+// later while pieces bake? This scenario asserts conservation half a second
+// after the rocket lands, before anything has had time to sleep or bake.
+Scenario(
+    name: "house_blast_early",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 30),
+        Fire(weapon: rocket),
+        Wait(frames: 30),
+        Assert(check: debris_conserved, tolerance: None),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

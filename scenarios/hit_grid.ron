@@ -1,0 +1,56 @@
+// Six camera poses around the arena, each one shot plus a depth-window assert.
+//
+// `hit_matches_render` samples the rendered depth at the centre and at eight
+// lateral taps. The centre alone cannot see a sideways shift on a flat wall, so
+// the taps are evaluated after the crater exists: a hole drawn one brick off
+// makes the taps report "wall" where the CPU ray already escapes through it.
+Scenario(
+    name: "hit_grid",
+    scene: Some("studio"),
+    steps: [
+        // +X perimeter wall (x ~191.5).
+        Camera(pos: (180.0, 3.2, 128.0), yaw: 1.5707964, pitch: 0.0),
+        Wait(frames: 3),
+        Fire(weapon: shot),
+        Wait(frames: 90),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "hit_plus_x"),
+        // -X perimeter wall (x ~64.5).
+        Camera(pos: (76.0, 3.2, 128.0), yaw: -1.5707964, pitch: 0.0),
+        Wait(frames: 3),
+        Fire(weapon: shot),
+        Wait(frames: 90),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "hit_minus_x"),
+        // +Z perimeter wall (z ~191.5).
+        Camera(pos: (128.0, 3.2, 180.0), yaw: 3.1415927, pitch: 0.0),
+        Wait(frames: 3),
+        Fire(weapon: shot),
+        Wait(frames: 90),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "hit_plus_z"),
+        // -Z perimeter wall (z ~64.5).
+        Camera(pos: (128.0, 3.2, 76.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 3),
+        Fire(weapon: shot),
+        Wait(frames: 90),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "hit_minus_z"),
+        // Floor, looking down at 31 degrees.
+        Camera(pos: (128.0, 6.0, 170.0), yaw: 0.0, pitch: -0.55),
+        Wait(frames: 3),
+        Fire(weapon: shot),
+        Wait(frames: 90),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "hit_floor"),
+        // Oblique hit: 33 degrees of incidence on the +X perimeter wall, so the
+        // beam exits the arena through the crater and both sides report a miss.
+        Camera(pos: (185.0, 3.2, 170.0), yaw: 1.0, pitch: -0.1),
+        Wait(frames: 3),
+        Fire(weapon: shot),
+        Wait(frames: 90),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "hit_oblique"),
+        Exit,
+    ],
+)

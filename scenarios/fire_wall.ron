@@ -1,0 +1,24 @@
+// One rocket into the free-standing 4x3 m wall. Before / after / settled
+// screenshots plus the depth-vs-raycast and voxel-conservation asserts.
+//
+// `hit_matches_render` runs *before* the shot: after the explosion the
+// crosshair can be covered by a debris body (the G-buffer raycasts debris into
+// the same depth buffer), so the CPU world ray and the rendered depth are
+// legitimately different there. The conservation check runs after.
+Scenario(
+    name: "fire_wall",
+    scene: Some("studio"),
+    steps: [
+        Camera(pos: (148.0, 3.2, 162.0), yaw: 3.1415927, pitch: -0.05),
+        Wait(frames: 10),
+        Assert(check: hit_matches_render, tolerance: Some(0.25)),
+        Screenshot(name: "wall_before"),
+        Fire(weapon: rocket),
+        Wait(frames: 30),
+        Screenshot(name: "wall_after"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Wait(frames: 90),
+        Screenshot(name: "wall_settled"),
+        Exit,
+    ],
+)

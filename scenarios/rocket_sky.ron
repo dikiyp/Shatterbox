@@ -1,0 +1,14 @@
+Scenario(
+    name: "rocket_sky",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (126.0, 3.2, 150.0), yaw: 0.0, pitch: 0.55),
+        Wait(frames: 10),
+        Fire(weapon: rocket),
+        Wait(frames: 2),
+        Screenshot(name: "rocket_sky_flight"),
+        Wait(frames: 30),
+        Screenshot(name: "rocket_sky_late"),
+        Exit,
+    ],
+)

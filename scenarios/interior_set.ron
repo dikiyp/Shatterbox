@@ -1,0 +1,24 @@
+// Interior lighting set in the house: room corner, a window, and a ceiling
+// lamp. Used as the DDGI interior regression (no floating voxels, conservation,
+// and the same three angles after any GI change).
+Scenario(
+    name: "interior_set",
+    scene: Some("house"),
+    steps: [
+        // Room corner, looking along the two walls.
+        Camera(pos: (130.5, 1.7, 127.0), yaw: 2.20, pitch: -0.02),
+        Wait(frames: 80),
+        Screenshot(name: "interior_corner"),
+        // Close to the north window, sun side.
+        Camera(pos: (133.5, 1.7, 130.0), yaw: -0.55, pitch: 0.02),
+        Wait(frames: 60),
+        Screenshot(name: "interior_window"),
+        // Under the ceiling lamp, looking up at the fixture.
+        Camera(pos: (130.0, 1.7, 131.0), yaw: 2.30, pitch: 0.35),
+        Wait(frames: 60),
+        Screenshot(name: "interior_lamp"),
+        Assert(check: no_floating, tolerance: None),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

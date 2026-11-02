@@ -1,0 +1,90 @@
+// Test room (SHATTERBOX_SCENE=testroom). Fixed angles for the light and
+// reflection regressions: daylight through the windows, coloured DDGI bounce
+// between the red and blue walls, the glass pane and the wall mirror on the SSR
+// path, and the night rig. Every shot waits long enough for the 64-frame DDGI
+// slice cycle to converge.
+//
+// Effects bits: 1 shadows, 2 ssao, 4 ssgi, 16 taa, 32 fog, 64 ssr, 2048 ddgi.
+// VCT (8) is off on purpose: with the DDGI bit set `gi.wgsl` uses the atlas
+// instead of the colourless cone trace.
+Scenario(
+    name: "test_room",
+    scene: Some("testroom"),
+    steps: [
+        Effects(bits: 2167),
+        // Looking north-west from the far corner: the open north window and the
+        // red wall are both in frame. 60 frames = two full DDGI cycles.
+        Camera(pos: (141.8, 1.7, 141.8), yaw: -0.72, pitch: -0.04),
+        Wait(frames: 80),
+        Screenshot(name: "room_windows_day"),
+        // Bright-day A/B for the ambient double-count check.
+        Effects(bits: 119),
+        Wait(frames: 10),
+        Screenshot(name: "room_windows_day_noddgi"),
+        Effects(bits: 2167),
+        Assert(check: no_floating, tolerance: None),
+        Assert(check: voxel_conservation, tolerance: None),
+
+        // Facing the sun through the east windows: the screen-space god-ray
+        // march only produces visible beams when the sun is in front of the
+        // camera, so this angle is the one to judge them on.
+        TimeOfDay(hours: 7.0),
+        Camera(pos: (132.0, 1.7, 136.0), yaw: 1.5708, pitch: 0.20),
+        Wait(frames: 50),
+        Screenshot(name: "room_godrays"),
+        TimeOfDay(hours: 10.5),
+
+        // Straight down the middle: red wall on the left, blue wall on the
+        // right, white floor and ceiling picking up the bounce. 07:00 puts the
+        // sun almost horizontal in the east window, so it lands on the red wall.
+        TimeOfDay(hours: 7.0),
+        Camera(pos: (131.0, 1.6, 137.0), yaw: 0.450, pitch: 0.020),
+        Wait(frames: 80),
+        Screenshot(name: "room_paint_bounce"),
+        // A/B: same frame with the DDGI bit off (VCT stays off too, so the
+        // difference is exactly the coloured bounce contributed by the atlas).
+        Effects(bits: 119),
+        Wait(frames: 10),
+        Screenshot(name: "room_paint_bounce_noddgi"),
+        Effects(bits: 2167),
+
+        // Grazing view along the free-standing clear-glass pane: SSR only works
+        // when the mirrored ray stays in front of the camera, so the camera
+        // looks almost parallel to the glass.
+        TimeOfDay(hours: 15.5),
+        Camera(pos: (135.0, 1.6, 137.2), yaw: -1.82, pitch: -0.02),
+        Wait(frames: 60),
+        Screenshot(name: "room_glass_ssr"),
+
+        // Wall mirror between the north windows, seen head-on from the south.
+        // The mirrored ray walks back through the room, so the pane and the
+        // painted walls land in the reflection.
+        Camera(pos: (135.5, 1.7, 136.6), yaw: 3.1416, pitch: 0.02),
+        Wait(frames: 60),
+        Screenshot(name: "room_mirror"),
+
+        // Night: lamps only, no sun.
+        TimeOfDay(hours: 21.5),
+        Camera(pos: (136.0, 1.7, 129.0), yaw: 3.1416, pitch: 0.22),
+        Wait(frames: 60),
+        Screenshot(name: "room_night_lamps"),
+        // Night A/B for the ambient double-count check.
+        Effects(bits: 119),
+        Wait(frames: 10),
+        Screenshot(name: "room_night_lamps_noddgi"),
+        Effects(bits: 2167),
+
+        // Wall-wash at night: the red wall is lit hard on the left, the blue
+        // wall on the right, and the white floor between them should pick up
+        // both. This is the shot the coloured DDGI bounce is judged on.
+        Camera(pos: (134.0, 1.5, 136.0), yaw: -1.15, pitch: -0.28),
+        Wait(frames: 60),
+        Screenshot(name: "room_wall_bounce"),
+        Effects(bits: 119),
+        Wait(frames: 10),
+        Screenshot(name: "room_wall_bounce_noddgi"),
+        Effects(bits: 2167),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

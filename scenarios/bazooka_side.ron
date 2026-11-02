@@ -1,0 +1,27 @@
+// Side view of the bazooka blast: the wall face hides the outward throw from
+// the firing line, so move the camera after the rocket is away and look along
+// the facade. Used to verify that pieces actually leave the wall and fall.
+Scenario(
+    name: "bazooka_side",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 20),
+        Fire(weapon: rocket),
+        Wait(frames: 18),
+        // Stand in the throw path, far enough back that the pieces cross the
+        // frame instead of spawning behind the camera or inside the smoke.
+        Camera(pos: (123.5, 3.0, 156.0), yaw: 0.0, pitch: -0.02),
+        Wait(frames: 2),
+        Screenshot(name: "blast_side"),
+        Wait(frames: 20),
+        Screenshot(name: "mid_side"),
+        Wait(frames: 40),
+        Screenshot(name: "late_side"),
+        Wait(frames: 60),
+        Screenshot(name: "settled_side"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

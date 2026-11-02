@@ -1,0 +1,36 @@
+// DDGI convergence after a blast. Fixed camera on the red wall; a rocket opens
+// the wall, the room relights, and screenshots bracket the first ~520 frames.
+// Effects: shadows 1, ssao 2, ssgi 4, taa 16, fog 32, ssr 64, ddgi 2048 = 2167.
+// The DDGI preset itself comes from SHATTERBOX_GI so the same scenario runs the
+// low/medium/high matrix.
+Scenario(
+    name: "blast_room",
+    scene: Some("testroom"),
+    steps: [
+        Effects(bits: 2167),
+        TimeOfDay(hours: 15.5),
+        Camera(pos: (132.0, 1.7, 136.0), yaw: -1.5708, pitch: -0.02),
+        // Let the atlas converge before the blast so the screenshots measure
+        // the re-convergence only.
+        Wait(frames: 90),
+        Screenshot(name: "blast_pre"),
+        // Scene integrity is checked before destruction; after the blast the
+        // detached chunks are debris and are allowed to be in the air.
+        Assert(check: no_floating, tolerance: None),
+        Fire(weapon: rocket),
+        Wait(frames: 8),
+        Screenshot(name: "blast_t000"),
+        Wait(frames: 32),
+        Screenshot(name: "blast_t032"),
+        Wait(frames: 32),
+        Screenshot(name: "blast_t064"),
+        Wait(frames: 64),
+        Screenshot(name: "blast_t128"),
+        Wait(frames: 128),
+        Screenshot(name: "blast_t256"),
+        Wait(frames: 256),
+        Screenshot(name: "blast_t512"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

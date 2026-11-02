@@ -1,0 +1,22 @@
+// Silhouette edges: object against sky and object against floor. Catches the
+// half-resolution stair steps, halo and dither artefacts on the upsample.
+Scenario(
+    name: "edge_set",
+    scene: Some("studio"),
+    steps: [
+        // Column edge against the sky.
+        Camera(pos: (128.0, 12.0, 130.0), yaw: 0.0, pitch: 0.05),
+        Wait(frames: 20),
+        Screenshot(name: "edge_sky"),
+        // Floor meets the arena wall at a grazing angle.
+        Camera(pos: (120.0, 2.2, 150.0), yaw: 0.35, pitch: -0.25),
+        Wait(frames: 20),
+        Screenshot(name: "edge_floor"),
+        // Coloured cube silhouette on the floor.
+        Camera(pos: (120.0, 3.0, 140.0), yaw: -0.6, pitch: -0.15),
+        Wait(frames: 20),
+        Screenshot(name: "edge_cube"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

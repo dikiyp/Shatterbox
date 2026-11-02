@@ -1,0 +1,32 @@
+[package]
+name = "shatterbox-game"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "shatterbox"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+egui.workspace = true
+glam.workspace = true
+pollster.workspace = true
+ron.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shatterbox-core = { path = "../shatterbox-core" }
+shatterbox-destruction = { path = "../shatterbox-destruction" }
+shatterbox-gpu = { path = "../shatterbox-gpu" }
+shatterbox-physics = { path = "../shatterbox-physics" }
+shatterbox-platform = { path = "../shatterbox-platform" }
+shatterbox-render = { path = "../shatterbox-render" }
+shatterbox-tools = { path = "../shatterbox-tools" }
+shatterbox-voxel = { path = "../shatterbox-voxel" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+winit.workspace = true

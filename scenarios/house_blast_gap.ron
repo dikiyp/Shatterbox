@@ -1,0 +1,19 @@
+// Diagnostic only: same as `house_blast_perf`, but with a gap between the
+// screenshot and the shot, so a slow frame can be attributed to the capture
+// readback (fires right after the screenshot) or to the launch (fires after
+// the gap).
+Scenario(
+    name: "house_blast_gap",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 300),
+        Screenshot(name: "perf_before"),
+        Wait(frames: 60),
+        Fire(weapon: rocket),
+        Wait(frames: 900),
+        Screenshot(name: "perf_settled"),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

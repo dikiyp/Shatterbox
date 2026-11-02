@@ -1,0 +1,16 @@
+// Diagnostic: the house at night with the interior lamps on. The facade must
+// stay dark except where light escapes through a window or door.
+Scenario(
+    name: "house_night",
+    scene: Some("house"),
+    steps: [
+        TimeOfDay(hours: 0.5),
+        Camera(pos: (126.0, 3.5, 140.0), yaw: 0.0, pitch: -0.05),
+        Wait(frames: 30),
+        Screenshot(name: "house_night_outside"),
+        Camera(pos: (126.0, 3.0, 131.0), yaw: 3.14159, pitch: 0.0),
+        Wait(frames: 10),
+        Screenshot(name: "house_night_inside"),
+        Exit,
+    ],
+)

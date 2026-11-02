@@ -1,0 +1,28 @@
+// Flamethrower + dynamic smoke test.
+//
+// Slot 3 is the flamethrower: a short cone that ignites any voxel whose palette
+// material is flammable. The wooden crate stack in the test room burns, spreads
+// to its neighbours and finally chars away; the coarse smoke field carries the
+// plume around the concrete pillar. Dynamic smoke is bit 8192 and is off in the
+// normal game, so the scenario switches it on explicitly.
+//
+// Effects: 1 shadows, 2 ssao, 16 taa, 32 fog, 64 ssr, 2048 ddgi, 8192 smoke.
+Scenario(
+    name: "flame_test",
+    scene: Some("testroom"),
+    steps: [
+        Effects(bits: 10363),
+        Camera(pos: (134.0, 1.7, 131.0), yaw: 2.50, pitch: -0.10),
+        Wait(frames: 40),
+        Screenshot(name: "flame_before"),
+        Select(slot: 3),
+        Hold(weapon: flame, frames: 50),
+        Wait(frames: 10),
+        Screenshot(name: "flame_kindled"),
+        Wait(frames: 90),
+        Screenshot(name: "flame_burning"),
+        Wait(frames: 150),
+        Screenshot(name: "flame_smoke"),
+        Exit,
+    ],
+)

@@ -1,0 +1,18 @@
+// Carbine automatic fire: 3 s of held trigger into the brick wall
+// (~30 rounds at the fixed 60 Hz step). The report carries frame_ms p50/p99
+// and the dirty-brick count, so the cost of a sustained burst is visible.
+Scenario(
+    name: "carbine_hold",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.0, 139.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 20),
+        Screenshot(name: "hold_before"),
+        Select(slot: 2),
+        Hold(weapon: carbine, frames: 180),
+        Wait(frames: 60),
+        Screenshot(name: "hold_after"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "gamedev-debug-ui": {
+      "source": "sunsided/gamedev-skills",
+      "sourceType": "github",
+      "skillPath": "gamedev/gamedev-debug-ui/SKILL.md",
+      "computedHash": "a4cd7e682104a0babdcab3d308c4005f24f37fe3af842292e77f3def9faba4c6"
+    },
+    "gamedev-profiling": {
+      "source": "sunsided/gamedev-skills",
+      "sourceType": "github",
+      "skillPath": "gamedev/gamedev-profiling/SKILL.md",
+      "computedHash": "d3098070e26e1d15b1e0e492cc248f2cf3d69ed8318e1bf772a4f32ba51895dc"
+    },
+    "gamedev-rust-workspace": {
+      "source": "sunsided/gamedev-skills",
+      "sourceType": "github",
+      "skillPath": "gamedev/gamedev-rust-workspace/SKILL.md",
+      "computedHash": "eea5de249bf7b64b5c35982d683b7c2034ddd6938e80b3b0af38a23c863f468b"
+    },
+    "gamedev-wgpu-rendering": {
+      "source": "sunsided/gamedev-skills",
+      "sourceType": "github",
+      "skillPath": "gamedev/gamedev-wgpu-rendering/SKILL.md",
+      "computedHash": "129baa33110be9c9430ff7e20f1a9d65c30cd466a3cefc6dcc9109189049100c"
+    },
+    "gamedev-wgsl-shaders": {
+      "source": "sunsided/gamedev-skills",
+      "sourceType": "github",
+      "skillPath": "gamedev/gamedev-wgsl-shaders/SKILL.md",
+      "computedHash": "bc1247c4ddeb2db13fb3b547ef32ada76687d1a327ceac1ae6596e710554617f"
+    },
+    "gamedev-winit-loop": {
+      "source": "sunsided/gamedev-skills",
+      "sourceType": "github",
+      "skillPath": "gamedev/gamedev-winit-loop/SKILL.md",
+      "computedHash": "c4eea23f9d955f7d7cefe48f4d363449b20ea0e87190f72251af2d30f22ee884"
+    }
+  }
+}

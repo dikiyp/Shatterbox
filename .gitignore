@@ -1,0 +1,61 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Native build leftovers
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.obj
+
+# OS metadata
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Editors / IDEs
+.vscode/
+.idea/
+.vs/
+*.iml
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs and crash dumps
+*.log
+logs/
+*.dmp
+*.etl
+
+# Profiling / GPU captures (regenerable, large)
+*.puffin
+puffin-*.json
+*.wpix
+*.rdc
+*.pix
+captures/
+
+# Coverage output
+*.profraw
+*.profdata
+lcov.info
+coverage/
+
+# Autotest harness output (also under /target, kept here for explicit runs
+# into a custom --out directory)
+autotest/

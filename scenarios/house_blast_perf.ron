@@ -1,0 +1,20 @@
+// Lag reproduction: five seconds of steady state, one rocket into the house,
+// then fifteen seconds of physics and rubble. `report.json.series` is the
+// 0.25 s timeline of frame/GPU time, live bodies, dirty bricks and CPU stages,
+// so the question "what got slow *after* the shot" is answered by data.
+Scenario(
+    name: "house_blast_perf",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        // 5 s at 60 Hz settled, nothing moving.
+        Wait(frames: 300),
+        Screenshot(name: "perf_before"),
+        Fire(weapon: rocket),
+        // 15 s: flight, blast, debris falling, sleeping, baking.
+        Wait(frames: 900),
+        Screenshot(name: "perf_settled"),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)

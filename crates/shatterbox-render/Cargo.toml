@@ -1,0 +1,26 @@
+[package]
+name = "shatterbox-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+glam.workspace = true
+pollster.workspace = true
+shatterbox-core = { path = "../shatterbox-core" }
+shatterbox-gpu = { path = "../shatterbox-gpu" }
+shatterbox-voxel = { path = "../shatterbox-voxel" }
+tracing.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+
+[dev-dependencies]
+naga = { version = "30.0.1", features = ["wgsl-in"] }

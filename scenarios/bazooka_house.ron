@@ -1,0 +1,23 @@
+// Bazooka check on the house: the crosshair must agree with the rendered
+// depth, the rocket must fly visibly, and the blast must land where aimed.
+Scenario(
+    name: "bazooka_house",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 20),
+        Screenshot(name: "bazooka_before"),
+        Assert(check: hit_matches_render, tolerance: Some(1.0)),
+        Fire(weapon: rocket),
+        Wait(frames: 2),
+        Screenshot(name: "bazooka_flight"),
+        Wait(frames: 14),
+        Screenshot(name: "bazooka_blast"),
+        Wait(frames: 120),
+        Screenshot(name: "bazooka_settled"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)
+

@@ -1,0 +1,15 @@
+[package]
+name = "shatterbox-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+glam.workspace = true
+shatterbox-core = { path = "../shatterbox-core" }
+tracing.workspace = true
+winit.workspace = true

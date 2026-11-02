@@ -1,0 +1,53 @@
+// Three lighting conditions and the three candidate looks.
+// A = neutral, B = cinematic, C = punchy. Pick the final one by eye.
+Scenario(
+    name: "looks",
+    scene: Some("house"),
+    steps: [
+        // Bright day, exterior: sun, shadows and sky reflections.
+        TimeOfDay(hours: 12.0),
+        Camera(pos: (118.0, 4.0, 118.0), yaw: 2.35619, pitch: -0.06),
+        Effects(bits: 123),
+        Wait(frames: 60),
+        Post(debug: 0, look: 0),
+        Wait(frames: 20),
+        Screenshot(name: "day_a"),
+        Post(debug: 0, look: 1),
+        Wait(frames: 20),
+        Screenshot(name: "day_b"),
+        Post(debug: 0, look: 2),
+        Wait(frames: 20),
+        Screenshot(name: "day_c"),
+
+        // Low sun, exterior: long warm light and cool shadows.
+        TimeOfDay(hours: 17.2),
+        Camera(pos: (118.0, 4.0, 118.0), yaw: 2.35619, pitch: -0.06),
+        Wait(frames: 60),
+        Post(debug: 0, look: 0),
+        Wait(frames: 20),
+        Screenshot(name: "low_a"),
+        Post(debug: 0, look: 1),
+        Wait(frames: 20),
+        Screenshot(name: "low_b"),
+        Post(debug: 0, look: 2),
+        Wait(frames: 20),
+        Screenshot(name: "low_c"),
+
+        // Night, interior: warm lamps, readable materials, no toxic colour.
+        TimeOfDay(hours: 22.0),
+        Camera(pos: (130.0, 3.0, 131.0), yaw: -0.78, pitch: 0.08),
+        Wait(frames: 90),
+        Post(debug: 0, look: 0),
+        Wait(frames: 20),
+        Screenshot(name: "night_a"),
+        Post(debug: 0, look: 1),
+        Wait(frames: 20),
+        Screenshot(name: "night_b"),
+        Post(debug: 0, look: 2),
+        Wait(frames: 20),
+        Screenshot(name: "night_c"),
+
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

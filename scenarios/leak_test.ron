@@ -1,0 +1,21 @@
+// DDGI leak test through a thin (2-voxel, 25 cm) wall. The camera is outside
+// the west wall at night; the wall-wash lamp is 0.75 m behind that wall. A
+// correct probe visibility leaves the exterior face unchanged, a leak brightens
+// it with the DDGI bit on. Compare the two screenshots: mean luminance delta
+// below 5% of the exterior face's own luminance passes.
+Scenario(
+    name: "leak_test",
+    scene: Some("testroom"),
+    steps: [
+        TimeOfDay(hours: 21.5),
+        Effects(bits: 2167),
+        Camera(pos: (126.0, 1.7, 136.0), yaw: 1.5708, pitch: -0.05),
+        Wait(frames: 90),
+        Screenshot(name: "leak_on"),
+        Effects(bits: 119),
+        Wait(frames: 10),
+        Screenshot(name: "leak_off"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

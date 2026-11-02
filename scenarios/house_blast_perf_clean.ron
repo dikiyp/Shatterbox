@@ -1,0 +1,14 @@
+// Screenshot-free bazooka stress run for frame-time statistics.
+// Five seconds settled, one rocket, fifteen seconds of physics and rubble.
+Scenario(
+    name: "house_blast_perf_clean",
+    scene: Some("house"),
+    steps: [
+        Camera(pos: (123.5, 3.4, 142.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 300),
+        Fire(weapon: rocket),
+        Wait(frames: 900),
+        Assert(check: debris_conserved, tolerance: None),
+        Exit,
+    ],
+)
