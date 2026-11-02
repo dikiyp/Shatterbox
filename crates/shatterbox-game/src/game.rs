@@ -46,19 +46,19 @@ const FIRE_RADIUS_VOXELS: i32 = 10;
 /// bigger than the hand tool because the projectile has to travel first.
 const ROCKET_SPEED_MPS: f32 = 42.0;
 const ROCKET_GRAVITY_MPS2: f32 = -9.0;
-// 14 voxels = 1.75 m, the largest value that stays inside the 20-voxel
-// destruction clamp after the 1.4x blast variation. The extra throw now comes
-// from the higher charge and the soft outer tail in `spawn_clusters`, which
-// moves the detached wall panel instead of freezing it at the radius.
-const ROCKET_RADIUS_VOXELS: i32 = FIRE_RADIUS_VOXELS + 4;
+// 20 voxels = 2.5 m. The old 1.75 m crater read as a dent, not an explosion;
+// the destruction clamp is now 32 so the 1.4x blast roll (28 voxels) is not
+// truncated. The radius grows the removed volume ~2.9x; charge only grows 1.5x
+// so the rubble is not launched across the whole arena.
+const ROCKET_RADIUS_VOXELS: i32 = 18;
 const ROCKET_LIFETIME_S: f32 = 6.0;
 const MAX_ROCKETS: usize = 8;
 /// Mass of the tool's shaped charge, in kilograms of TNT equivalent. The
 /// deposited kinetic energy follows from the detonation energy of TNT, so
 /// fragment velocities stay a physical consequence instead of a tuned number.
-// 0.30 kg TNT equivalent: a rocket still opens a 1.5-2 m crater and throws the
-// freed wall, but no longer launches the whole facade across the street.
-const SHOT_CHARGE_KG: f32 = 0.30;
+// 0.45 kg TNT equivalent: enough throw for a 2.5 m crater to read as a blast,
+// while the 20-voxel radius still leaves the surrounding structure standing.
+const SHOT_CHARGE_KG: f32 = 0.40;
 /// Detonation energy of TNT (4.184 MJ/kg).
 const TNT_ENERGY_J_PER_KG: f32 = 4.184e6;
 const SHOT_ENERGY_JOULES: f32 = SHOT_CHARGE_KG * TNT_ENERGY_J_PER_KG;
@@ -1402,6 +1402,7 @@ impl Game {
             sun_intensity: renderer.sun_intensity(),
             fog_density: renderer.fog_density(),
             fog_height: renderer.fog_height(),
+            fog_smooth: renderer.fog_smooth(),
             exposure: renderer.exposure(),
             auto_exposure: renderer.auto_exposure(),
             exposure_bias: renderer.exposure_bias(),
@@ -1462,6 +1463,7 @@ impl Game {
         renderer.set_sun_intensity(actions.sun_intensity);
         renderer.set_fog_density(actions.fog_density);
         renderer.set_fog_height(actions.fog_height);
+        renderer.set_fog_smooth(actions.fog_smooth);
         renderer.set_exposure(actions.exposure);
         renderer.set_auto_exposure(actions.auto_exposure);
         renderer.set_exposure_bias(actions.exposure_bias);
@@ -2153,9 +2155,10 @@ impl Game {
                 * fade_in
                 * fade_out
                 * fade_out
-                // The local volume owns most of the visible density; puffs stay
-                // as the fire/heat accent instead of double-counting the smoke.
-                * if self.smoke_sim { 0.45 } else { 1.0 };
+                // The local volume owns the visible density; puffs stay only as a
+                // hot fire accent. 0.45 still drew opaque sprite balls that cut
+                // through walls, which read as the "smoke ignores voxels" bug.
+                * if self.smoke_sim { 0.06 } else { 1.0 };
             if opacity <= 0.004 || puff.radius <= 1.0e-3 {
                 continue;
             }
@@ -2276,7 +2279,7 @@ impl Game {
             if self.frame_dirty_bricks > 0 {
                 bx.dirty_age += dt;
             }
-            if bx.dirty_age >= 0.25 {
+            if bx.dirty_age >= 0.05 {
                 bx.dirty_age = 0.0;
                 let started = std::time::Instant::now();
                 let mask = build(&self.world, bx.center);
@@ -2356,12 +2359,19 @@ impl Game {
         self.push_smoke_emitter(
             SmokeSource {
                 position: point,
-                radius: 2.4,
-                density: 6.0,
-                temperature: 1.2,
-                updraft: 4.5,
+                radius: 2.6,
+                // Dense enough to read as a volumetric cloud inside a room,
+                // not a faint haze. The raymarch extinction turns this into
+                // ~80 % opacity over the first metre.
+                density: 9.0,
+                // Smoke, not a fireball: the orange glow belongs to the first
+                // ~0.2 s, the body is soot that cools to grey.
+                temperature: 0.8,
+                updraft: 1.8,
             },
-            0.7,
+            // Keep feeding the plume for 2.5 s. A 0.9 s source left a puff that
+            // the flow carried out of the box before it could fill the room.
+            2.5,
         );
         self.weapon_shake = WEAPON_SHAKE_SECONDS * scale;
         let Some(destruction) = &mut self.destruction else {
@@ -2543,11 +2553,14 @@ impl Game {
                 SmokeSource {
                     position: point,
                     radius: 3.0,
-                    density: 6.0,
-                    temperature: 0.25,
-                    updraft: 2.6,
+                    density: 10.0,
+                    // Hot enough for the yellow-white core of the blackbody
+                    // ramp; the flame now follows the simulated flow instead of
+                    // being an orange sprite glued to the voxel.
+                    temperature: 1.1,
+                    updraft: 3.2,
                 },
-                0.8,
+                0.6,
             );
             let index = self.smoke.len() as u32;
             let seed = self.sim_tick as u32 ^ cell.x as u32 ^ cell.z as u32;
@@ -3166,6 +3179,8 @@ struct UiActions {
     sun_intensity: f32,
     fog_density: f32,
     fog_height: f32,
+    /// Trilinear probe sampling in fog; A/B switch for the 8 m square bubble.
+    fog_smooth: bool,
     /// Linear HDR exposure, auto-exposure toggle, EV bias and post look.
     exposure: f32,
     auto_exposure: bool,
@@ -3465,6 +3480,10 @@ fn draw_overlay(ctx: &egui::Context, data: &OverlayData, actions: &mut UiActions
                     .suffix(" m"),
             );
             ui.checkbox(
+                &mut actions.fog_smooth,
+                "Smooth fog probes  (trilinear; off = old 8 m squares)",
+            );
+            ui.checkbox(
                 &mut actions.auto_exposure,
                 "Auto exposure  (log-luminance meter, adapted)",
             );
@@ -3703,19 +3722,20 @@ mod tests {
 
     #[test]
     fn blast_size_stays_inside_the_configured_range() {
-        // 0.7..1.4x of the 14-voxel base crater (1.75 m), so the radius has to
-        // land in 10..20 voxels and the energy in 0.49..1.96x the base.
+        // 0.7..1.4x of the 18-voxel base crater (2.25 m), so the radius has to
+        // land in 13..25 voxels and the energy stays at the base value (the
+        // destruction clamp is 32).
         let base = ROCKET_RADIUS_VOXELS as f32;
         for seed in 0..512u32 {
             let scale = blast_scale(true, seed);
             assert!((0.7..=1.4).contains(&scale), "scale {scale} out of range");
             let (radius, energy) = blast_geometry(scale);
             assert!(
-                (10..=20).contains(&radius),
-                "radius {radius} outside 10..=20 voxels"
+                (13..=25).contains(&radius),
+                "radius {radius} outside 13..=25 voxels"
             );
             assert!((radius as f32) <= base * 1.4 + 0.5);
-            assert!((0.49 * SHOT_ENERGY_JOULES..=1.96 * SHOT_ENERGY_JOULES).contains(&energy));
+            assert_eq!(energy, SHOT_ENERGY_JOULES);
         }
     }
 
