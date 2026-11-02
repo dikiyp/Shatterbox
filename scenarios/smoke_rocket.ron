@@ -1,0 +1,28 @@
+// fx_lab / part 3: a rocket inside the closed room has to fill it with the
+// local GPU smoke volume and push the plume through the window and the door.
+Scenario(
+    name: "smoke_rocket",
+    scene: Some("fx_lab"),
+    steps: [
+        Effects(bits: 10355),
+        TimeOfDay(hours: 12.0),
+        Camera(pos: (107.5, 1.7, 106.2), yaw: -0.99, pitch: -0.10),
+        Wait(frames: 60),
+        Screenshot(name: "rocket_before"),
+        Assert(check: no_floating, tolerance: None),
+        Fire(weapon: rocket),
+        Wait(frames: 30),
+        Screenshot(name: "rocket_0_5s"),
+        Wait(frames: 30),
+        Screenshot(name: "rocket_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "rocket_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "rocket_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "rocket_8s"),
+        Wait(frames: 420),
+        Screenshot(name: "rocket_15s"),
+        Exit,
+    ],
+)

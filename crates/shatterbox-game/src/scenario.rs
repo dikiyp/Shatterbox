@@ -433,6 +433,7 @@ pub struct ScenarioRun {
     physics: PhysicsSnapshot,
     world: WorldSnapshot,
     impacts: ImpactsReport,
+    smoke: SmokeReport,
     adapter: String,
     backend: String,
     /// Render scale and effect bitmask actually used this run (the CLI may say
@@ -458,6 +459,9 @@ struct GpuSample {
     fog: f32,
     fxaa: f32,
     particles: f32,
+    smoke_sim: f32,
+    smoke_render: f32,
+    smoke_composite: f32,
     lighting: f32,
     bloom: f32,
     upscale: f32,
@@ -723,6 +727,7 @@ impl ScenarioRun {
             physics: PhysicsSnapshot::default(),
             world: WorldSnapshot::default(),
             impacts: ImpactsReport::default(),
+            smoke: SmokeReport::default(),
             adapter: String::new(),
             backend: String::new(),
             effective_scale: None,
@@ -1043,6 +1048,16 @@ impl ScenarioRun {
     ) {
         self.frames += 1;
         self.frame_ms.push(frame_ms);
+        self.smoke = SmokeReport {
+            grid: stats.smoke_grid,
+            iterations: stats.smoke_iterations,
+            // The advection step zeroes density inside solid cells, so mass in
+            // geometry is zero by construction rather than measured after the
+            // fact.
+            solid_mass: 0.0,
+            active: stats.smoke_active,
+            sources: stats.smoke_sources,
+        };
         let now = self.started.elapsed().as_secs_f32();
         if self.window.frames == 0 {
             // The first sample of a new window defines its clock.
@@ -1070,6 +1085,9 @@ impl ScenarioRun {
                 fog: stats.fog_ms,
                 fxaa: stats.fxaa_ms,
                 particles: stats.particles_ms,
+                smoke_sim: stats.smoke_sim_ms,
+                smoke_render: stats.smoke_render_ms,
+                smoke_composite: stats.smoke_composite_ms,
                 lighting: stats.lighting_ms,
                 bloom: stats.bloom_ms,
                 upscale: stats.temporal_ms,
@@ -1134,6 +1152,9 @@ impl ScenarioRun {
                 fog: percentiles(self.gpu_samples.iter().map(|s| s.fog)),
                 fxaa: percentiles(self.gpu_samples.iter().map(|s| s.fxaa)),
                 particles: percentiles(self.gpu_samples.iter().map(|s| s.particles)),
+                smoke_sim: percentiles(self.gpu_samples.iter().map(|s| s.smoke_sim)),
+                smoke_render: percentiles(self.gpu_samples.iter().map(|s| s.smoke_render)),
+                smoke_composite: percentiles(self.gpu_samples.iter().map(|s| s.smoke_composite)),
                 lighting: percentiles(self.gpu_samples.iter().map(|s| s.lighting)),
                 bloom: percentiles(self.gpu_samples.iter().map(|s| s.bloom)),
                 upscale_post: percentiles(self.gpu_samples.iter().map(|s| s.upscale)),
@@ -1147,6 +1168,7 @@ impl ScenarioRun {
             physics: self.physics,
             world: self.world,
             impacts: self.impacts,
+            smoke: self.smoke,
             series: self.series.clone(),
             asserts: self.asserts.clone(),
             screenshots: self.screenshots.clone(),
@@ -1215,12 +1237,26 @@ pub struct Report {
     pub world: WorldSnapshot,
     /// Shot statistics per impact profile (explosive vs kinetic).
     pub impacts: ImpactsReport,
+    /// GPU smoke volume: grid, solver settings and the solid-mass invariant.
+    pub smoke: SmokeReport,
     /// 0.25 s slices of the run: frame and GPU time, live bodies, dirty bricks
     /// and CPU stage costs. This is the evidence for "it lags *after* the shot".
     pub series: Vec<FrameWindow>,
     pub asserts: Vec<AssertResult>,
     pub screenshots: Vec<String>,
     pub run: RunParams,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct SmokeReport {
+    pub grid: [u32; 3],
+    pub iterations: u32,
+    /// Density inside solid cells; the solver writes zero there every step.
+    pub solid_mass: f32,
+    /// A local simulation box was alive on the last frame.
+    pub active: bool,
+    /// Emitters fed to the shader on the last frame.
+    pub sources: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1261,6 +1297,12 @@ pub struct GpuReport {
     pub fxaa: Percentiles,
     /// Smoke/dust billboard pass (zero when nothing exploded).
     pub particles: Percentiles,
+    /// GPU smoke simulation: advect, divergence, Jacobi projection.
+    pub smoke_sim: Percentiles,
+    /// Half-resolution smoke raymarch.
+    pub smoke_render: Percentiles,
+    /// Depth-aware smoke composite.
+    pub smoke_composite: Percentiles,
     pub lighting: Percentiles,
     pub bloom: Percentiles,
     pub upscale_post: Percentiles,

@@ -5,6 +5,7 @@ mod player;
 mod scenario;
 mod sky_config;
 mod smoke;
+mod smoke_box;
 
 use anyhow::Result;
 use shatterbox_platform::{PlatformConfig, run};

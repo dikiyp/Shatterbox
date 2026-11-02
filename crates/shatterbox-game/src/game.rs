@@ -12,7 +12,8 @@ use shatterbox_physics::JoltPhysics;
 use shatterbox_platform::{App, AppEvent, Input};
 use shatterbox_render::{
     AreaLight, DdgiQuality, DebrisView, FrameOutcome, MAX_DEBRIS_VOXELS, MAX_RENDER_DEBRIS,
-    Particle, PointLight, RenderEffects, RenderStats, Renderer, ShadowMode,
+    Particle, PointLight, RenderEffects, RenderStats, Renderer, SMOKE_GRID, SMOKE_SPACING,
+    ShadowMode, SmokeSource,
 };
 use shatterbox_voxel::scene::{
     GROUND_ANCHOR_VOXEL, SceneKind, fx_lab_lamp_positions, house_lamp_positions,
@@ -20,6 +21,19 @@ use shatterbox_voxel::scene::{
 };
 use shatterbox_voxel::{Voxel, VoxelWorld, materials};
 use winit::event::{DeviceEvent, WindowEvent};
+
+/// Active local smoke box: fixed centre, lifetime after the last emitter and
+/// the time spent waiting for destruction edits to settle before rebuilding
+/// the obstacle mask.
+struct SmokeBox {
+    center: Vec3,
+    ttl: f32,
+    dirty_age: f32,
+}
+
+/// Zero density for the coarse 4 m fog field while the GPU volume is active, so
+/// the same smoke is not counted twice.
+static ZERO_DENSITY: [u8; 64 * 16 * 64] = [0; 64 * 16 * 64];
 use winit::window::Window;
 
 use crate::player::Player;
@@ -87,6 +101,14 @@ pub struct Game {
     dust_grains: bool,
     /// Coarse dynamic smoke field uploaded to `fog.wgsl` (cosmetic).
     smoke_field: SmokeField,
+    /// Local GPU smoke box (part 3). `None` means no active source.
+    smoke_box: Option<SmokeBox>,
+    /// Emitters collected for the GPU step: payload plus remaining lifetime.
+    smoke_emitters: Vec<(SmokeSource, f32)>,
+    /// `SHATTERBOX_SMOKE_SIM=0` restores the coarse CPU field and billboards.
+    smoke_sim: bool,
+    /// CPU cost of the last obstacle rebuild, ms (reported via `cpu.smoke`).
+    smoke_mask_ms: f32,
     /// Voxels currently on fire (flamethrower / spreading burn).
     burning: Vec<Burning>,
     show_overlay: bool,
@@ -900,6 +922,16 @@ impl Game {
             debris_settle: settle_debris_default(),
             dust_grains: dust_grains_default(),
             smoke_field: SmokeField::new(),
+            smoke_box: None,
+            smoke_emitters: Vec::new(),
+            smoke_sim: !matches!(
+                std::env::var("SHATTERBOX_SMOKE_SIM")
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "0" | "false" | "off"
+            ),
+            smoke_mask_ms: 0.0,
             burning: Vec::new(),
             show_overlay: true,
             benchmark: std::env::var("SHATTERBOX_BENCHMARK")
@@ -2117,7 +2149,13 @@ impl Game {
             // Squared fade-out: the cloud thins gradually instead of switching
             // off at full opacity, which reads as a deleted sprite.
             let fade_out = 1.0 - ((t - 0.4) / 0.6).clamp(0.0, 1.0);
-            let opacity = puff.tint[3] * fade_in * fade_out * fade_out;
+            let opacity = puff.tint[3]
+                * fade_in
+                * fade_out
+                * fade_out
+                // The local volume owns most of the visible density; puffs stay
+                // as the fire/heat accent instead of double-counting the smoke.
+                * if self.smoke_sim { 0.45 } else { 1.0 };
             if opacity <= 0.004 || puff.radius <= 1.0e-3 {
                 continue;
             }
@@ -2159,7 +2197,112 @@ impl Game {
             renderer.set_particles(&scratch);
             renderer.set_smoke_density(&gpu.queue, self.smoke_field.bytes());
         }
+        self.update_gpu_smoke(dt);
         self.particle_scratch = scratch;
+    }
+
+    /// Maintains the local GPU smoke box and feeds it the emitters collected by
+    /// explosions and burning voxels. When `SHATTERBOX_SMOKE_SIM=0` (or the
+    /// dynamic-smoke bit is off) the coarse CPU field above is uploaded instead.
+    fn update_gpu_smoke(&mut self, dt: f32) {
+        let (Some(gpu), Some(renderer)) = (self.gpu.as_ref(), self.renderer.as_mut()) else {
+            return;
+        };
+        if !self.smoke_sim || !renderer.effects().dynamic_smoke {
+            if renderer.smoke_active() {
+                renderer.clear_smoke_box();
+            }
+            self.smoke_box = None;
+            self.smoke_emitters.clear();
+            renderer.set_smoke_density(&gpu.queue, self.smoke_field.bytes());
+            return;
+        }
+        for (_, ttl) in &mut self.smoke_emitters {
+            *ttl -= dt;
+        }
+        self.smoke_emitters.retain(|(_, ttl)| *ttl > 0.0);
+        let sources: Vec<SmokeSource> = self
+            .smoke_emitters
+            .iter()
+            .take(4)
+            .map(|(source, _)| *source)
+            .collect();
+        let half = Vec3::from_array(shatterbox_render::SMOKE_HALF_EXTENTS);
+        let build = |world: &VoxelWorld, center: Vec3| {
+            crate::smoke_box::build_mask(world, center - half, SMOKE_SPACING, SMOKE_GRID)
+        };
+
+        if self.smoke_box.is_none() {
+            if let Some(source) = sources.first().copied() {
+                let center = source.position + Vec3::new(0.0, 4.0, 0.0);
+                let started = std::time::Instant::now();
+                let mask = build(&self.world, center);
+                self.smoke_mask_ms = started.elapsed().as_secs_f32() * 1000.0;
+                renderer.set_smoke_box(&gpu.queue, center, &mask);
+                self.smoke_box = Some(SmokeBox {
+                    center,
+                    ttl: 6.0,
+                    dirty_age: 0.0,
+                });
+            }
+        }
+
+        // Follow the active source when a fire crawls across the courtyard.
+        let mut recenter = None;
+        if let (Some(source), Some(bx)) = (sources.first(), self.smoke_box.as_ref()) {
+            let desired = source.position + Vec3::new(0.0, 4.0, 0.0);
+            if (desired - bx.center).length() > 6.0 {
+                recenter = Some(desired);
+            }
+        }
+        if let Some(center) = recenter {
+            let started = std::time::Instant::now();
+            let mask = build(&self.world, center);
+            self.smoke_mask_ms = started.elapsed().as_secs_f32() * 1000.0;
+            renderer.set_smoke_box(&gpu.queue, center, &mask);
+            self.smoke_box = Some(SmokeBox {
+                center,
+                ttl: 6.0,
+                dirty_age: 0.0,
+            });
+        }
+
+        if let Some(bx) = &mut self.smoke_box {
+            if sources.is_empty() {
+                bx.ttl -= dt;
+            } else {
+                bx.ttl = 6.0;
+            }
+            if self.frame_dirty_bricks > 0 {
+                bx.dirty_age += dt;
+            }
+            if bx.dirty_age >= 0.25 {
+                bx.dirty_age = 0.0;
+                let started = std::time::Instant::now();
+                let mask = build(&self.world, bx.center);
+                self.smoke_mask_ms = started.elapsed().as_secs_f32() * 1000.0;
+                renderer.update_smoke_obstacles(&gpu.queue, &mask);
+            }
+        }
+
+        if self.smoke_box.as_ref().is_some_and(|bx| bx.ttl <= 0.0) {
+            renderer.clear_smoke_box();
+            self.smoke_box = None;
+            self.smoke_emitters.clear();
+        }
+        renderer.set_smoke_sources(&sources);
+        // The GPU volume owns the smoke while it is alive; zero the coarse fog
+        // field so the same plume is not integrated twice.
+        renderer.set_smoke_density(&gpu.queue, &ZERO_DENSITY);
+    }
+
+    /// Stores an emitter for the GPU smoke box; it keeps emitting for `ttl`
+    /// seconds. Only the newest eight are kept, four reach the shader.
+    fn push_smoke_emitter(&mut self, source: SmokeSource, ttl: f32) {
+        if self.smoke_emitters.len() >= 8 {
+            self.smoke_emitters.remove(0);
+        }
+        self.smoke_emitters.push((source, ttl.max(0.05)));
     }
 
     /// Buckets the sizes of newly created debris pieces for `report.json`.
@@ -2210,6 +2353,16 @@ impl Game {
         self.spawn_smoke(point, seed, scale);
         self.smoke_field
             .add_source(point, radius.max(2) as f32 * 0.125 * 1.8, 0.6);
+        self.push_smoke_emitter(
+            SmokeSource {
+                position: point,
+                radius: 2.4,
+                density: 6.0,
+                temperature: 1.2,
+                updraft: 4.5,
+            },
+            0.7,
+        );
         self.weapon_shake = WEAPON_SHAKE_SECONDS * scale;
         let Some(destruction) = &mut self.destruction else {
             return;
@@ -2386,6 +2539,16 @@ impl Game {
         self.burning.retain(|burn| burn.fuel > 0.0);
         for cell in flame_points {
             let point = (cell.as_vec3() + Vec3::splat(0.5)) * shatterbox_voxel::VOXEL_SIZE_M;
+            self.push_smoke_emitter(
+                SmokeSource {
+                    position: point,
+                    radius: 3.0,
+                    density: 6.0,
+                    temperature: 0.25,
+                    updraft: 2.6,
+                },
+                0.8,
+            );
             let index = self.smoke.len() as u32;
             let seed = self.sim_tick as u32 ^ cell.x as u32 ^ cell.z as u32;
             let mut puff = make_puff(
