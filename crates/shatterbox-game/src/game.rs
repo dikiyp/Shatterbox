@@ -830,6 +830,14 @@ fn test_room_lights() -> Vec<PointLight> {
 /// deliberately unlit: daylight must enter them through the opening the
 /// scenario makes.
 fn fx_lab_lights() -> Vec<PointLight> {
+    // A/B hook for the colour-bounce test: with the warm lamps off, the enclosed
+    // room is lit only by daylight through its window plus indirect light, so a
+    // red/blue tint on the white floor can only come from DDGI bounce.
+    // `SHATTERBOX_FXLAB_LAMPS=0` disables the rig; the default keeps it.
+    if std::env::var("SHATTERBOX_FXLAB_LAMPS").is_ok_and(|value| value == "0") {
+        tracing::info!("fx_lab lamp rig disabled by SHATTERBOX_FXLAB_LAMPS=0");
+        return Vec::new();
+    }
     // (intensity, radius): enclosed room, corridor, lit room, hall. The lab is
     // a test scene, so the fixtures are deliberately strong enough to read the
     // smoke and columns at noon without daylight help.

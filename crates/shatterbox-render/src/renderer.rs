@@ -116,8 +116,10 @@ const DDGI_ALBEDO_DIMS: (u32, u32, u32) = (256, 64, 256);
 /// refreshed once every 64 frames, so 0.85 still lets a changed room converge
 /// in a couple of seconds while a single stray frame cannot flash a texel.
 const DDGI_HYSTERESIS: f32 = 0.85;
-/// Hysteresis used near a fresh crater for the priority window.
-const DDGI_PRIORITY_HYSTERESIS: f32 = 0.55;
+/// Hysteresis used near a fresh crater for the priority window. 0.45 keeps
+/// ~91% after three refreshes (~1.5 s at two slices per frame), which is the
+/// gi_blast acceptance criterion.
+const DDGI_PRIORITY_HYSTERESIS: f32 = 0.45;
 
 /// Dynamic smoke density volume: 4 m cells over the 256x64x256 m arena. The
 /// game advects these cells on the CPU (16k cells is cheap) and uploads R8.
@@ -396,14 +398,16 @@ impl DdgiQuality {
         }
     }
 
-    /// `SHATTERBOX_GI`, defaulting to medium: the measured budget (see plan
-    /// 10.10) keeps it under the 1.5 ms gate, otherwise this is switched to low.
+    /// `SHATTERBOX_GI`, defaulting to **off** until part 2 is accepted: the
+    /// measured budget keeps medium under the 1.5 ms gate, but the addendum
+    /// (item 8) enables DDGI by default only after the user's acceptance. F1 or
+    /// the environment can still select medium/high for A/B.
     #[must_use]
     pub fn from_env() -> Self {
         std::env::var("SHATTERBOX_GI")
             .ok()
             .and_then(|raw| Self::parse(&raw))
-            .unwrap_or(Self::Medium)
+            .unwrap_or(Self::Off)
     }
 
     #[must_use]
@@ -1257,7 +1261,10 @@ struct BindGroups {
     shadow: wgpu::BindGroup,
     light_shadow: wgpu::BindGroup,
     lighting: wgpu::BindGroup,
-    gi: [wgpu::BindGroup; 2],
+    /// `[history][ddgi]`: `history` selects which HDR target SSGI reads, `ddgi`
+    /// selects the atlas written last frame (the blend ping-pongs slices, so
+    /// reading a fixed atlas left every other z slice black).
+    gi: [[wgpu::BindGroup; 2]; 2],
     probe: wgpu::BindGroup,
     fog: wgpu::BindGroup,
     bloom_prefilter: wgpu::BindGroup,
@@ -1944,8 +1951,8 @@ impl Renderer {
         );
         // DDGI is user-facing through its quality preset. `SHATTERBOX_GI`
         // (off/low/medium/high) enables the internal bit 2048 itself; an unset
-        // variable starts at medium, which the 10.10 measurement keeps under the
-        // 1.5 ms gate.
+        // variable starts at off until part 2 is accepted. The measured medium
+        // preset stays under the 1.5 ms gate.
         let ddgi_quality = DdgiQuality::from_env();
         effects.ddgi = ddgi_quality != DdgiQuality::Off;
         // `SHATTERBOX_LIGHT_AA=1` (or the F1 checkbox) enables the pre-upscale
@@ -3302,6 +3309,13 @@ impl Renderer {
                 self.targets.gi_size,
             );
         }
+        // Atlas written by the last blend dispatch above (the cursor already
+        // points at the next slice).
+        let ddgi_atlas = if self.effects.ddgi {
+            (((self.ddgi_slice + DDGI_GRID.2 - 1) % DDGI_GRID.2) % 2) as usize
+        } else {
+            0
+        };
         // SSAO, SSR and the cone trace share one half-resolution pass. When all
         // three are off, the lighting pass ignores the textures entirely, so
         // the dispatch is skipped.
@@ -3310,7 +3324,7 @@ impl Renderer {
                 encoder,
                 Some(TS_GI),
                 &self.pipelines.gi,
-                &self.bind_groups.gi[self.history_parity],
+                &self.bind_groups.gi[self.history_parity][ddgi_atlas],
                 self.targets.gi_size,
             );
         }
@@ -4363,7 +4377,7 @@ impl BindGroups {
                 ),
             ],
         });
-        let make_gi = |write: usize| {
+        let make_gi = |write: usize, ddgi_atlas: usize| {
             let read = 1 - write;
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Shatterbox gi bind group"),
@@ -4385,16 +4399,19 @@ impl BindGroups {
                         7,
                         wgpu::BindingResource::TextureView(&targets.reflection_view),
                     ),
-                    // DDGI is bound to atlas 0: the blend writes atlas 0 on odd
-                    // slices and atlas 1 on even ones, so atlas 0 is never more
-                    // than one slice behind the freshest irradiance.
+                    // The atlas written by this frame's blend. `gi.wgsl` runs
+                    // after DDGI in the same encoder, so this is the freshest
+                    // irradiance; the old fixed atlas 0 missed every odd z
+                    // slice.
                     entry(
                         8,
-                        wgpu::BindingResource::TextureView(&targets.ddgi_irradiance_views[0]),
+                        wgpu::BindingResource::TextureView(
+                            &targets.ddgi_irradiance_views[ddgi_atlas],
+                        ),
                     ),
                     entry(
                         9,
-                        wgpu::BindingResource::TextureView(&targets.ddgi_moments_views[0]),
+                        wgpu::BindingResource::TextureView(&targets.ddgi_moments_views[ddgi_atlas]),
                     ),
                     entry(10, ddgi_state.as_entire_binding()),
                 ],
@@ -4587,7 +4604,10 @@ impl BindGroups {
             shadow,
             light_shadow,
             lighting,
-            gi: [make_gi(0), make_gi(1)],
+            gi: [
+                [make_gi(0, 0), make_gi(0, 1)],
+                [make_gi(1, 0), make_gi(1, 1)],
+            ],
             probe,
             fog,
             ddgi_inject,

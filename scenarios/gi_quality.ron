@@ -1,0 +1,40 @@
+// fx_lab / part 2: DDGI quality and energy A/B.
+//
+// This scenario deliberately has no `Effects` step: the startup mask and
+// `SHATTERBOX_GI` choose the preset, so the harness can run it four times with
+// SHATTERBOX_GI=off|low|medium|high and compare the same frames.
+//
+// Shots:
+//   bounce_red_day   - white floor next to the red west wall (colour bounce)
+//   bounce_blue_day  - same floor next to the blue east wall
+//   outside_day      - outdoor courtyard: DDGI must not darken the open sky
+//   interior_evening - 19:00, lamp + residual sky in the enclosed room
+//   interior_night   - 22:00, lamp only: DDGI carries the bounce
+Scenario(
+    name: "gi_quality",
+    scene: Some("fx_lab"),
+    steps: [
+        TimeOfDay(hours: 12.0),
+        Camera(pos: (105.0, 2.0, 104.0), yaw: -1.5708, pitch: -0.55),
+        Wait(frames: 150),
+        Screenshot(name: "bounce_red_day"),
+        Camera(pos: (105.0, 2.0, 104.0), yaw: 1.5708, pitch: -0.55),
+        Wait(frames: 150),
+        Screenshot(name: "bounce_blue_day"),
+        Camera(pos: (105.0, 3.9, 104.0), yaw: -1.5708, pitch: -1.35),
+        Wait(frames: 150),
+        Screenshot(name: "floor_down"),
+        Camera(pos: (125.0, 3.0, 131.0), yaw: 0.0, pitch: 0.0),
+        Wait(frames: 150),
+        Screenshot(name: "outside_day"),
+        Camera(pos: (105.0, 2.0, 104.0), yaw: -1.5708, pitch: -0.55),
+        TimeOfDay(hours: 19.0),
+        Wait(frames: 150),
+        Screenshot(name: "interior_evening"),
+        TimeOfDay(hours: 22.0),
+        Wait(frames: 150),
+        Screenshot(name: "interior_night"),
+        Assert(check: no_floating, tolerance: None),
+        Exit,
+    ],
+)

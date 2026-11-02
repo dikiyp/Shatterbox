@@ -89,11 +89,6 @@ const GRID_Y: u32 = 16u;
 const GRID_Z: u32 = 64u;
 const TILE: u32 = 8u;
 const PI: f32 = 3.14159265;
-// 40 x 0.65 m = 26 m of reach, a little more than MAX_DISTANCE so a ray that
-// leaves the probe's neighbourhood still ends on the sky instead of a stale
-// brick.
-const TRACE_STEPS: i32 = 40;
-const TRACE_STEP_M: f32 = 0.65;
 const MAX_DISTANCE: f32 = 24.0;
 /// Sun rays through the voxel grid. The arena is 256 m across, but the sun
 /// direction reaches the world bound far sooner; the DDA early-outs on empty
@@ -343,6 +338,149 @@ fn occluded(ro: vec3<f32>, rd: vec3<f32>, max_distance: f32) -> bool {
     return false;
 }
 
+/// First solid voxel along the ray, at 12.5 cm precision.
+///
+/// The old radiance march tested the 2 m brick index every 0.65 m. A 2 m brick
+/// that contains a 12.5 cm wall reports the whole cell as solid, so a probe on
+/// one side of a thin wall "hit" the wall at the brick boundary and lit the
+/// room behind it. This is the same hierarchy the shadow DDA uses (brick index
+/// -> 8/4/2 m occupancy -> voxel mask), returning the entry distance of the
+/// first occupied voxel instead of a boolean.
+fn trace_hit(ro: vec3<f32>, rd: vec3<f32>, max_distance: f32) -> f32 {
+    let max_cell = vec3<i32>(frame.world_max.xyz / VOXEL_SIZE) - vec3<i32>(1);
+    let inside_world = all(ro >= frame.world_min.xyz) && all(ro < frame.world_max.xyz);
+    var distance = 1e-5;
+    if (!inside_world) {
+        let bounds = intersect_world(ro, rd);
+        if (bounds.y <= 0.0 || bounds.x > bounds.y) {
+            return -1.0;
+        }
+        distance = max(bounds.x, 0.0) + 1e-5;
+    }
+    var cell = clamp(
+        vec3<i32>(floor((ro + rd * distance) / VOXEL_SIZE)),
+        vec3<i32>(0),
+        max_cell,
+    );
+    let step = vec3<i32>(
+        select(-1, 1, rd.x >= 0.0),
+        select(-1, 1, rd.y >= 0.0),
+        select(-1, 1, rd.z >= 0.0),
+    );
+    let t_delta = vec3<f32>(
+        select(1e30, VOXEL_SIZE / abs(rd.x), abs(rd.x) > 1e-8),
+        select(1e30, VOXEL_SIZE / abs(rd.y), abs(rd.y) > 1e-8),
+        select(1e30, VOXEL_SIZE / abs(rd.z), abs(rd.z) > 1e-8),
+    );
+    var t_max = max(init_t_max(cell, step, ro, rd), vec3<f32>(distance));
+
+    var brick_coord = vec3<i32>(-1);
+    var id = 0u;
+    var mask_base = 0u;
+    var mask_word_index = 0xffffffffu;
+    var mask_word_value = 0u;
+
+    for (var i = 0; i < DDA_STEPS; i = i + 1) {
+        if (distance > max_distance) {
+            break;
+        }
+        if (any(cell < vec3<i32>(0)) || any(cell > max_cell)) {
+            break;
+        }
+
+        let coord = cell / BRICK_DIM;
+        if (any(coord != brick_coord)) {
+            brick_coord = coord;
+            id = textureLoad(brick_index_tex, coord, 0).r;
+            mask_base = (id - 1u) * MASK_WORDS;
+            mask_word_index = 0xffffffffu;
+        }
+
+        if (id == 0u) {
+            var boundary = min_boundary3(
+                block_boundary(t_max.x, t_delta.x, cell.x, step.x, BRICK_DIM),
+                block_boundary(t_max.y, t_delta.y, cell.y, step.y, BRICK_DIM),
+                block_boundary(t_max.z, t_delta.z, cell.z, step.z, BRICK_DIM),
+            );
+            let region = cell / REGION_VOXELS;
+            if (textureLoad(region_occupancy_tex, region, 0).r == 0u) {
+                boundary = min_boundary3(
+                    block_boundary(t_max.x, t_delta.x, cell.x, step.x, REGION_VOXELS),
+                    block_boundary(t_max.y, t_delta.y, cell.y, step.y, REGION_VOXELS),
+                    block_boundary(t_max.z, t_delta.z, cell.z, step.z, REGION_VOXELS),
+                );
+            } else {
+                let group = cell / GROUP_VOXELS;
+                if (textureLoad(group_occupancy_tex, group, 0).r == 0u) {
+                    boundary = min_boundary3(
+                        block_boundary(t_max.x, t_delta.x, cell.x, step.x, GROUP_VOXELS),
+                        block_boundary(t_max.y, t_delta.y, cell.y, step.y, GROUP_VOXELS),
+                        block_boundary(t_max.z, t_delta.z, cell.z, step.z, GROUP_VOXELS),
+                    );
+                }
+            }
+            if (boundary.x > max_distance || boundary.x >= 1e29) {
+                break;
+            }
+            let previous = cell;
+            distance = boundary.x;
+            cell = jump_cell(cell, step, ro, rd, distance, i32(boundary.y));
+            t_max = max(t_max + vec3<f32>((cell - previous) * step) * t_delta, vec3<f32>(distance));
+            continue;
+        }
+
+        let local = cell & vec3<i32>(15);
+        var skip = 0;
+        if (!block_occupied(mask_base, MASK2_OFFSET, local, 8)) {
+            skip = 8;
+        } else if (!block_occupied(mask_base, MASK4_OFFSET, local, 4)) {
+            skip = 4;
+        } else if (!block_occupied(mask_base, MASK8_OFFSET, local, 2)) {
+            skip = 2;
+        }
+        if (skip != 0) {
+            let boundary = min_boundary3(
+                block_boundary(t_max.x, t_delta.x, cell.x, step.x, skip),
+                block_boundary(t_max.y, t_delta.y, cell.y, step.y, skip),
+                block_boundary(t_max.z, t_delta.z, cell.z, step.z, skip),
+            );
+            if (boundary.x > max_distance || boundary.x >= 1e29) {
+                break;
+            }
+            let previous = cell;
+            distance = boundary.x;
+            cell = jump_cell(cell, step, ro, rd, distance, i32(boundary.y));
+            t_max = max(t_max + vec3<f32>((cell - previous) * step) * t_delta, vec3<f32>(distance));
+            continue;
+        }
+
+        let bit = u32(local.x + BRICK_DIM * (local.y + BRICK_DIM * local.z));
+        let word_index = bit >> 5u;
+        if (word_index != mask_word_index) {
+            mask_word_index = word_index;
+            mask_word_value = masks[mask_base + word_index];
+        }
+        if (((mask_word_value >> (bit & 31u)) & 1u) != 0u) {
+            return distance;
+        }
+
+        if (t_max.x <= t_max.y && t_max.x <= t_max.z) {
+            distance = t_max.x;
+            cell.x = cell.x + step.x;
+            t_max.x = t_max.x + t_delta.x;
+        } else if (t_max.y <= t_max.z) {
+            distance = t_max.y;
+            cell.y = cell.y + step.y;
+            t_max.y = t_max.y + t_delta.y;
+        } else {
+            distance = t_max.z;
+            cell.z = cell.z + step.z;
+            t_max.z = t_max.z + t_delta.z;
+        }
+    }
+    return -1.0;
+}
+
 fn solid_normal(p: vec3<f32>) -> vec3<f32> {
     let d = 0.9;
     let gx = f32(occupancy(p + vec3<f32>(d, 0.0, 0.0))) - f32(occupancy(p - vec3<f32>(d, 0.0, 0.0)));
@@ -459,13 +597,14 @@ fn prev_irradiance_at(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     return sum / max(weight_sum, 1e-4);
 }
 
-/// Reads the injected albedo near a brick hit. Occupancy is a 2 m brick, so the
-/// ray stops up to two metres *before* the real surface: walk forward along the
-/// ray until a cell the camera actually saw is found.
-fn sample_albedo(p: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+/// Reads the injected albedo at a real voxel hit. The surface cell is usually
+/// the one the camera shaded, so start there and only then walk back towards
+/// the probe through the air cells the ray crossed.
+fn sample_albedo(p: vec3<f32>, normal: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     let dims = textureDimensions(albedo_volume);
     for (var i = 0; i < 5; i = i + 1) {
-        let uv = world_to_volume_uv(p + dir * (0.2 + f32(i) * 0.5));
+        let offset = select(-dir * (0.15 + f32(i) * 0.3), normal * 0.05, i == 0);
+        let uv = world_to_volume_uv(p + offset);
         let cell = clamp(
             vec3<i32>(floor(uv * vec3<f32>(dims))),
             vec3<i32>(0),
@@ -482,33 +621,67 @@ fn sample_albedo(p: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
 /// Returns `(radiance.rgb, hit_distance)` for one direction.
 fn trace_radiance(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     if (occupancy(origin) != 0u) {
-        // Buried probe: it sees neither sky nor sun.
+        // Unrelocatable probe: it sees neither sky nor sun.
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
-    let sun = normalize(frame.sun_dir.xyz);
-    var t = 0.4;
-    for (var i = 0; i < TRACE_STEPS; i = i + 1) {
-        let p = origin + dir * t;
-        if (occupancy(p) != 0u) {
-            let n = solid_normal(p);
-            let albedo_sample = sample_albedo(p, dir);
-            let albedo = albedo_sample.rgb;
-            let emissive = max(albedo_sample.a - 1.0, 0.0);
-            let visibility = sun_visibility(p + n * 0.2);
-            let direct = frame.sun_color.rgb * max(dot(n, sun), 0.0) * visibility;
-            let lights = local_light_radiance(p + n * 0.3, n);
-            // Second bounce was a cheap feedback loop, but in a closed white
-            // room it amplified the atlas until the wall read as a flat
-            // saturated colour. One bounce is plenty at this probe density.
-            let indirect = vec3<f32>(0.0);
-            let ambient = sky_radiance(n) * 0.35;
-            let radiance = albedo * (direct / PI + lights / PI + indirect + ambient)
-                + albedo * emissive * 1.5;
-            return vec4<f32>(clamp(radiance, vec3<f32>(0.0), vec3<f32>(32.0)), t);
-        }
-        t = t + TRACE_STEP_M;
+    let hit = trace_hit(origin, dir, MAX_DISTANCE);
+    if (hit < 0.0) {
+        return vec4<f32>(sky_radiance(dir), MAX_DISTANCE);
     }
-    return vec4<f32>(sky_radiance(dir), MAX_DISTANCE);
+    let p = origin + dir * hit;
+    let n = solid_normal(p);
+    let albedo_sample = sample_albedo(p, n, dir);
+    let albedo = albedo_sample.rgb;
+    let emissive = max(albedo_sample.a - 1.0, 0.0);
+    let visibility = sun_visibility(p + n * 0.2);
+    let direct = frame.sun_color.rgb * max(dot(n, normalize(frame.sun_dir.xyz)), 0.0) * visibility;
+    let lights = local_light_radiance(p + n * 0.3, n);
+    // Second bounce: the previous atlas already carries the one-bounce
+    // irradiance, so feeding a quarter of it back adds the room-to-room bleed
+    // that one bounce misses. Kept below 0.5 to stay stable.
+    let indirect = prev_irradiance_at(p + n * 0.25, n) * (0.25 / PI);
+    let ambient = sky_radiance(n) * 0.35;
+    let radiance = albedo * (direct / PI + lights / PI + indirect + ambient)
+        + albedo * emissive * 1.5;
+    return vec4<f32>(clamp(radiance, vec3<f32>(0.0), vec3<f32>(32.0)), hit);
+}
+
+/// Moves a probe that landed inside a solid brick out to free space.
+///
+/// Occupancy is a 2 m brick, so a probe at 4 m spacing can sit inside a wall or
+/// a ceiling slab. Such a probe used to trace black rays and drag the trilinear
+/// blend down. Walk along the occupancy gradient and then in the six axis
+/// directions until an empty brick is found. Returns `w = 1` when moved (or
+/// already free), `w = 0` when the probe is buried in a thick solid.
+fn relocate_probe(origin: vec3<f32>) -> vec4<f32> {
+    if (occupancy(origin) == 0u) {
+        return vec4<f32>(origin, 1.0);
+    }
+    let gradient = solid_normal(origin);
+    for (var i = 1; i <= 5; i = i + 1) {
+        let candidate = origin + gradient * (0.45 * f32(i));
+        if (occupancy(candidate) == 0u) {
+            return vec4<f32>(candidate, 1.0);
+        }
+        let opposite = origin - gradient * (0.45 * f32(i));
+        if (occupancy(opposite) == 0u) {
+            return vec4<f32>(opposite, 1.0);
+        }
+    }
+    let step = params.spacing * 0.5;
+    for (var a = 0; a < 6; a = a + 1) {
+        let axis = vec3<f32>(
+            select(0.0, 1.0, a == 0 || a == 1),
+            select(0.0, 1.0, a == 2 || a == 3),
+            select(0.0, 1.0, a == 4 || a == 5),
+        );
+        let sign = select(-1.0, 1.0, (a & 1) == 0);
+        let candidate = origin + axis * sign * step;
+        if (occupancy(candidate) == 0u) {
+            return vec4<f32>(candidate, 1.0);
+        }
+    }
+    return vec4<f32>(origin, 0.0);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -528,7 +701,16 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let atlas = vec2<i32>(i32(gid.x), i32(z * tile_extent.y + gid.y));
 
-    let origin = frame.world_min.xyz + (vec3<f32>(probe) + vec3<f32>(0.5)) * params.spacing;
+    let origin = relocate_probe(
+        frame.world_min.xyz + (vec3<f32>(probe) + vec3<f32>(0.5)) * params.spacing,
+    );
+    if (origin.w < 0.5) {
+        // Still inside a solid after relocation (thick wall / ceiling): write a
+        // zero-distance ray so the blend and Chebyshev test treat the probe as
+        // occluded instead of letting it sample stale light.
+        textureStore(out_trace, atlas, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        return;
+    }
     var radiance = vec3<f32>(0.0);
     var distance = 0.0;
     for (var s = 0u; s < samples; s = s + 1u) {
@@ -539,7 +721,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let uv = (vec2<f32>(texel) + vec2<f32>(0.5 + offset)) / f32(tile) * 2.0
             - vec2<f32>(1.0);
         let dir = octahedral_direction(uv);
-        let sample = trace_radiance(origin, dir);
+        let sample = trace_radiance(origin.xyz, dir);
         radiance = radiance + sample.rgb;
         distance = distance + sample.w;
     }

@@ -524,13 +524,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let gi_ao = clamp(gi_sample.a, 0.0, 1.0);
     let occlusion = ao * mix(1.0, gi_ao, 0.75);
-    // VCT and DDGI both carry the sky/ground hemisphere with voxel visibility.
-    // DDGI is a replacement, not an addition: with the fill left at 1.0 the
-    // measured frame was +39% brighter than the no-DDGI reference, which is
-    // exactly the double count. 0.6 was the best balance found: dropping the
-    // fill to 0 made the 07:00 interior 26% darker than the reference because
-    // 4 m probes under-sample a shadowed room, while 0.6 keeps the day within
-    // +18% / night +10% and the shadowed interior within -9%.
+    // DDGI replaces the analytic hemisphere: once probes carry a real sky and
+    // bounce term, keeping the full fill double-counts it (+39% measured in the
+    // day interior). A small 0.18 fallback remains so a pixel whose eight
+    // probes are all occluded does not go pitch black.
     let vct_on = (u32(frame.params3.x) & 8u) != 0u;
     let ddgi_on = (u32(frame.params3.x) & 2048u) != 0u;
     // Diagnostic bit 6 (64) keeps the full analytic hemisphere even with VCT
@@ -540,7 +537,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let volume_gi = vct_on || ddgi_on;
     let ambient_scale = select(
         select(1.0, 0.55, volume_gi && !full_ambient),
-        1.0,
+        0.18,
         ddgi_on && !full_ambient,
     );
     // A little warm light from the sunlit floor, strongest on downward faces.
@@ -549,8 +546,11 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         + vec3<f32>(0.075, 0.052, 0.030) * floor_bounce;
     color = color + diffuse_albedo * ambient * occlusion * ambient_scale;
     // AO multiplies the indirect term as well: without it a 4 m probe grid
-    // paints the same bounce into every crease and reads flat.
-    color = color + diffuse_albedo * gi_sample.rgb * mix(0.10, 0.35, occlusion);
+    // paints the same bounce into every crease and reads flat. DDGI is the
+    // primary diffuse source now, so it keeps most of its energy (the old
+    // 0.10..0.35 fudge existed to hide the double count with the ambient).
+    let indirect_weight = select(mix(0.10, 0.35, occlusion), mix(0.65, 1.0, occlusion), ddgi_on);
+    color = color + diffuse_albedo * gi_sample.rgb * indirect_weight;
     // Cheapest believable bounce: a surface facing the sun but occluded from it
     // still catches light thrown by the sunlit floor and walls. The old term
     // only fired on back-facing normals, so an interior wall in shadow stayed
