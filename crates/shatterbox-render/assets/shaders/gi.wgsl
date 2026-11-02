@@ -155,6 +155,13 @@ fn ddgi_probe_irradiance(probe: vec3<i32>, dir: vec3<f32>) -> vec3<f32> {
 /// keeps bounce from leaking through the wall into the neighbouring room.
 fn ddgi_visibility(probe: vec3<i32>, dir: vec3<f32>, distance: f32) -> f32 {
     let moments = textureLoad(ddgi_moments, ddgi_texel(probe, dir), 0);
+    // Buried probes (relocation failed) are stored as all-zero moments. They are
+    // not "a wall at 0 m away": the old floor of 0.08 still gave their black
+    // irradiance 8 % of the trilinear weight, which painted a dark line on every
+    // wall at each 4 m probe plane. Exclude them from the blend entirely.
+    if (moments.r == 0.0 && moments.g == 0.0) {
+        return 0.0;
+    }
     let mean = moments.r * DDGI_MAX_DISTANCE;
     let variance = max(moments.g * DDGI_MAX_DISTANCE * DDGI_MAX_DISTANCE - mean * mean, 0.0025);
     if (distance <= mean) {
@@ -199,7 +206,14 @@ fn ddgi_sample_irradiance(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
         sum = sum + ddgi_probe_irradiance(index, n) * weight;
         weight_sum = weight_sum + weight;
     }
-    return sum / max(weight_sum, 1e-4);
+    // If every corner is invalid/fully occluded, fall back to the nearest probe
+    // without a visibility weight. `sum / 1e-4` used to return black, which is
+    // what produced the hard dark cells around relocated probes.
+    if (weight_sum < 0.02) {
+        let nearest = clamp(vec3<i32>(round(base)), vec3<i32>(0), grid - vec3<i32>(1));
+        return ddgi_probe_irradiance(nearest, n);
+    }
+    return sum / weight_sum;
 }
 
 
