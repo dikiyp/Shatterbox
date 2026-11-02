@@ -226,6 +226,15 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let t = start + step_len * (f32(i) + jitter);
         let p = camera + view_dir * t;
         var state = state_at(p);
+        // Fade density near the simulation box boundary. Without it the finite
+        // box cut a visible cube out of a smoke cloud that reached the wall.
+        let box_size = sim.spacing.xyz * vec3<f32>(sim.grid.xyz);
+        let local01 = clamp((p - sim.origin.xyz) / max(box_size, vec3<f32>(0.001)), vec3<f32>(0.0), vec3<f32>(1.0));
+        let edge = smoothstep(0.0, 0.06, local01.x) * smoothstep(0.0, 0.06, 1.0 - local01.x)
+            * smoothstep(0.0, 0.06, local01.y) * smoothstep(0.0, 0.06, 1.0 - local01.y)
+            * smoothstep(0.0, 0.06, local01.z) * smoothstep(0.0, 0.06, 1.0 - local01.z);
+        state.x *= edge;
+        state.y *= edge;
         // Break up the perfectly smooth grid density with two noise octaves.
         let wisp = 0.70
             + 0.36 * value_noise(p * 0.9 + vec3<f32>(frame.params.x * 0.15, 0.0, 0.0))
@@ -270,7 +279,19 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let albedo = mix(vec3<f32>(0.045, 0.040, 0.036), vec3<f32>(0.52, 0.52, 0.52), age);
         var radiance = albedo * (lit + sun_term);
         let heat = clamp(state.y, 0.0, 1.5);
-        radiance += vec3<f32>(1.0, 0.28, 0.05) * pow(heat, 2.0) * 1.2;
+        // Blackbody-style ramp instead of one flat orange: soot-red at the edge,
+        // orange in the body, yellow-white in the hot core. The noise flicker is
+        // sampled in world space and drifts upward with the flow, so the flame
+        // tongue moves with the plume instead of pulsing per screen pixel.
+        let flicker = 0.82
+            + 0.18 * value_noise(p * 2.7 - vec3<f32>(0.0, frame.params.x * 3.2, 0.0))
+            + 0.10 * value_noise(p * 6.1 + vec3<f32>(frame.params.x * 1.7));
+        let deep = vec3<f32>(0.55, 0.055, 0.008);
+        let orange = vec3<f32>(1.0, 0.30, 0.035);
+        let core = vec3<f32>(1.0, 0.86, 0.52);
+        let body = mix(deep, orange, smoothstep(0.10, 0.62, heat));
+        let flame_color = mix(body, core, smoothstep(0.62, 1.30, heat));
+        radiance += flame_color * pow(heat, 2.2) * 3.2 * flicker;
 
         let sigma = density * EXTINCTION;
         let step_t = exp(-sigma * step_len);

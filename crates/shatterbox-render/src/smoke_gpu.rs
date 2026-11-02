@@ -611,7 +611,7 @@ impl SmokeGpu {
             origin: [self.origin.x, self.origin.y, self.origin.z, 0.0],
             spacing: [SMOKE_SPACING[0], SMOKE_SPACING[1], SMOKE_SPACING[2], 0.0],
             grid: [SMOKE_GRID.0, SMOKE_GRID.1, SMOKE_GRID.2, 0],
-            params: [dt.clamp(0.0, 1.0 / 30.0), 2.6, 1.2, 0.55],
+            params: [dt.clamp(0.0, 1.0 / 30.0), 1.35, 1.0, 0.55],
             params2: [0.10, time, 0.015, 0.008],
             params3: [1.0, 0.0, 0.0, 0.0],
             source: [[0.0; 4]; MAX_SOURCES],
