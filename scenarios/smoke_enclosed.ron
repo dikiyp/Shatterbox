@@ -1,0 +1,34 @@
+// fx_lab / part 1: smoke has to fill the closed room and escape through the
+// window and the door.
+//
+// Effects: 1 shadows, 2 ssao, 16 taa, 32 fog, 64 ssr, 2048 ddgi, 8192 smoke.
+Scenario(
+    name: "smoke_enclosed",
+    scene: Some("fx_lab"),
+    steps: [
+        Effects(bits: 10355),
+        TimeOfDay(hours: 12.0),
+        // Aim at the floor, not at the wall: a rocket through a 0.25 m wall
+        // opens a hole and the room stops being closed, which defeats the test.
+        Camera(pos: (107.5, 1.7, 106.2), yaw: -0.99, pitch: -0.10),
+        Wait(frames: 60),
+        Screenshot(name: "enclosed_before"),
+        Assert(check: no_floating, tolerance: None),
+        Select(slot: 3),
+        Hold(weapon: flame, frames: 30),
+        Screenshot(name: "enclosed_0_5s"),
+        Hold(weapon: flame, frames: 30),
+        Screenshot(name: "enclosed_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "enclosed_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "enclosed_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "enclosed_8s"),
+        Wait(frames: 420),
+        Screenshot(name: "enclosed_15s"),
+        // Fire deletes charred voxels without adding them to the dust counter;
+        // part 4 owns that accounting, so only the structural assert runs here.
+        Exit,
+    ],
+)

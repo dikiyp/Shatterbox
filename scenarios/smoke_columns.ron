@@ -1,0 +1,32 @@
+// fx_lab / part 1: smoke from a wooden pallet between the two concrete
+// columns of the roofed hall. The plume must wrap around them instead of
+// passing through.
+//
+// Effects: 1 shadows, 2 ssao, 16 taa, 32 fog, 64 ssr, 2048 ddgi, 8192 smoke.
+Scenario(
+    name: "smoke_columns",
+    scene: Some("fx_lab"),
+    steps: [
+        Effects(bits: 10355),
+        TimeOfDay(hours: 12.0),
+        Camera(pos: (116.0, 1.7, 106.0), yaw: 1.666, pitch: -0.05),
+        Wait(frames: 60),
+        Screenshot(name: "columns_before"),
+        Assert(check: no_floating, tolerance: None),
+        Select(slot: 3),
+        Hold(weapon: flame, frames: 30),
+        Screenshot(name: "columns_0_5s"),
+        Hold(weapon: flame, frames: 30),
+        Screenshot(name: "columns_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "columns_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "columns_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "columns_8s"),
+        Wait(frames: 420),
+        Screenshot(name: "columns_15s"),
+        // Fire ash accounting is part 4; see smoke_enclosed.
+        Exit,
+    ],
+)

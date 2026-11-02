@@ -1,0 +1,35 @@
+// fx_lab / part 1: blast a hole in the west wall of the sealed concrete room
+// and watch daylight enter. Camera stays inside the room looking at the wall,
+// so the room mean luminance before/after the blast is the DDGI reaction
+// metric (>= 90 % of the final brightness within 1.5 s is the acceptance bar
+// for part 2; this scenario only records the frames).
+//
+// Effects: 2167 = 1 shadows, 2 ssao, 4 ssgi, 16 taa, 32 fog, 64 ssr, 2048 ddgi.
+// Smoke is deliberately off so brightness is not contaminated by the plume.
+Scenario(
+    name: "gi_blast",
+    scene: Some("fx_lab"),
+    steps: [
+        Effects(bits: 2167),
+        TimeOfDay(hours: 15.5),
+        Camera(pos: (140.5, 1.7, 125.0), yaw: -1.5708, pitch: 0.0),
+        Wait(frames: 120),
+        Screenshot(name: "blast_before"),
+        Assert(check: no_floating, tolerance: None),
+        Fire(weapon: rocket),
+        Wait(frames: 30),
+        Screenshot(name: "blast_0_5s"),
+        Wait(frames: 30),
+        Screenshot(name: "blast_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "blast_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "blast_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "blast_8s"),
+        Wait(frames: 420),
+        Screenshot(name: "blast_15s"),
+        Assert(check: voxel_conservation, tolerance: None),
+        Exit,
+    ],
+)

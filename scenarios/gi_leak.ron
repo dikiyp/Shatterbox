@@ -1,0 +1,33 @@
+// fx_lab / part 1: light leak through a one-voxel concrete divider.
+//
+// The lit room (west, x101..107) has a window and a lamp; the dark room (east,
+// x107.25..113) has no window and no lamp. Camera sits in the dark room looking
+// at the divider. The only light that can reach it is what leaks through the
+// one-voxel wall, so the dark-room mean luminance is the metric: it must stay
+// below the lit-room mean by a wide margin.
+//
+// Effects on:  2167 = 1 shadows, 2 ssao, 4 ssgi, 16 taa, 32 fog, 64 ssr, 2048 ddgi.
+// Effects off: 119  = the same without the ddgi bit (A/B).
+Scenario(
+    name: "gi_leak",
+    scene: Some("fx_lab"),
+    steps: [
+        TimeOfDay(hours: 21.5),
+        Effects(bits: 2167),
+        Camera(pos: (111.5, 1.7, 124.0), yaw: -1.5708, pitch: 0.0),
+        Wait(frames: 120),
+        Screenshot(name: "leak_on"),
+        Effects(bits: 119),
+        Wait(frames: 10),
+        Screenshot(name: "leak_off"),
+        Effects(bits: 2167),
+        Assert(check: no_floating, tolerance: None),
+        Assert(check: voxel_conservation, tolerance: None),
+        // Control shot from the lit side: same wall, same time, so the lit-room
+        // mean gives the reference brightness for the leak threshold.
+        Camera(pos: (104.0, 1.7, 124.0), yaw: 1.5708, pitch: 0.0),
+        Wait(frames: 90),
+        Screenshot(name: "leak_lit_control"),
+        Exit,
+    ],
+)

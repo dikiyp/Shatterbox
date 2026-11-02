@@ -1,0 +1,33 @@
+// fx_lab / part 1: 10 m open-top shaft. Rocket detonates at the bottom, the
+// plume has to climb the shaft (buoyancy) instead of spreading out sideways.
+//
+// Effects: 1 shadows, 2 ssao, 16 taa, 32 fog, 64 ssr, 2048 ddgi, 8192 smoke.
+Scenario(
+    name: "smoke_shaft",
+    scene: Some("fx_lab"),
+    steps: [
+        Effects(bits: 10355),
+        TimeOfDay(hours: 12.0),
+        // Wooden pallet at the shaft bottom gives a contained hot source, so
+        // the smoke climbs the 10 m shaft instead of venting through a hole.
+        Camera(pos: (133.4, 1.7, 106.0), yaw: 0.0, pitch: -0.08),
+        Wait(frames: 60),
+        Screenshot(name: "shaft_before"),
+        Assert(check: no_floating, tolerance: None),
+        Select(slot: 3),
+        Hold(weapon: flame, frames: 30),
+        Screenshot(name: "shaft_0_5s"),
+        Hold(weapon: flame, frames: 30),
+        Screenshot(name: "shaft_1s"),
+        Wait(frames: 60),
+        Screenshot(name: "shaft_2s"),
+        Wait(frames: 120),
+        Screenshot(name: "shaft_4s"),
+        Wait(frames: 240),
+        Screenshot(name: "shaft_8s"),
+        Wait(frames: 420),
+        Screenshot(name: "shaft_15s"),
+        // Fire ash accounting is part 4; see smoke_enclosed.
+        Exit,
+    ],
+)
