@@ -830,6 +830,10 @@ struct FrameUniform {
     /// x = 1 enables the debris reactive mask in the temporal upscaler,
     /// yzw reserved.
     params4: [f32; 4],
+    /// x = 1 enables trilinear probe-volume sampling in `fog.wgsl`
+    /// (`SHATTERBOX_FOG_SMOOTH`). Kept as its own tail field so every other
+    /// shader that declares only part of `Frame` stays valid.
+    params5: [f32; 4],
 }
 
 /// GPU auto-exposure accumulation state. Mirrors `ExposureState` in
@@ -885,6 +889,7 @@ impl FrameUniform {
         effects: RenderEffects,
         fog_density: f32,
         fog_height: f32,
+        fog_smooth: bool,
         shadow_mode: ShadowMode,
         upscale_clamp: bool,
     ) -> Self {
@@ -995,6 +1000,7 @@ impl FrameUniform {
                 [point.x, point.y, point.z, DEBUG_HIT_RADIUS_M]
             }),
             params4: [0.0, fog_height.max(0.5), 0.0, 0.0],
+            params5: [if fog_smooth { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -1500,6 +1506,9 @@ pub struct Renderer {
     /// Metres of height falloff: the fog density drops by `e` every
     /// `fog_height` metres above 1.5 m. 5 keeps the haze on the ground.
     fog_height: f32,
+    /// Trilinear instead of nearest sampling of the 8 m probe volume in
+    /// `fog.wgsl`; removes the blocky square boundary around the camera.
+    fog_smooth: bool,
     shadow_distance: f32,
     effects: RenderEffects,
     /// Sun shadow trace resolution / upsample filter (A/B switch for the
@@ -2154,6 +2163,9 @@ impl Renderer {
             sun_intensity,
             fog_density,
             fog_height,
+            fog_smooth: std::env::var("SHATTERBOX_FOG_SMOOTH")
+                .map(|v| v != "0")
+                .unwrap_or(true),
             shadow_distance,
             effects,
             shadow_mode,
@@ -2417,6 +2429,17 @@ impl Renderer {
     #[must_use]
     pub fn fog_height(&self) -> f32 {
         self.fog_height
+    }
+
+    /// Trilinear probe sampling in fog (default). `false` restores the 8 m
+    /// nearest-cell look for A/B.
+    pub fn set_fog_smooth(&mut self, smooth: bool) {
+        self.fog_smooth = smooth;
+    }
+
+    #[must_use]
+    pub fn fog_smooth(&self) -> bool {
+        self.fog_smooth
     }
 
     /// Current on/off state of the optional effects (shadows, SSAO, SSGI, VCT, TAA).
@@ -3086,6 +3109,7 @@ impl Renderer {
             self.effects,
             self.fog_density,
             self.fog_height,
+            self.fog_smooth,
             self.shadow_mode,
             self.upscale_clamp,
         );
@@ -5195,7 +5219,9 @@ fn create_layouts(device: &wgpu::Device) -> Layouts {
         entries: &[
             uniform(wgpu::ShaderStages::COMPUTE),
             sampled(1, false),
-            sampled_3d(2, false),
+            // The irradiance probe volume is Rgba16Float and is now sampled with
+            // the filtering sampler for smooth fog (see `probe_sun_visibility`).
+            sampled_3d(2, true),
             storage_texture(3, HDR_FORMAT),
             // Voxel sun shadow for the screen-space god-ray march.
             sampled(4, true),
@@ -5923,7 +5949,7 @@ mod tests {
 
     #[test]
     fn frame_uniform_is_16_byte_aligned() {
-        assert_eq!(size_of::<FrameUniform>(), 992);
+        assert_eq!(size_of::<FrameUniform>(), 1008);
         assert_eq!(size_of::<FrameUniform>() % 16, 0);
         assert_eq!(VOXEL_SIZE_M, 0.125);
     }
@@ -6018,6 +6044,7 @@ mod tests {
             "debris_max" => std::mem::offset_of!(FrameUniform, debris_max),
             "debug_hit" => std::mem::offset_of!(FrameUniform, debug_hit),
             "params4" => std::mem::offset_of!(FrameUniform, params4),
+            "params5" => std::mem::offset_of!(FrameUniform, params5),
             other => panic!("WGSL field `{other}` is missing from FrameUniform"),
         }
     }
@@ -6030,7 +6057,7 @@ mod tests {
     /// it may not skip or reorder a field.
     #[test]
     fn frame_uniform_matches_wgsl_layout() {
-        const RUST_FIELDS: [&str; 20] = [
+        const RUST_FIELDS: [&str; 21] = [
             "inv_view_proj",
             "view_proj",
             "prev_view_proj",
@@ -6051,6 +6078,7 @@ mod tests {
             "debris_max",
             "debug_hit",
             "params4",
+            "params5",
         ];
         // `bloom.wgsl` and `fxaa.wgsl` have no Frame; the other eleven do.
         let mut checked = 0;
@@ -6117,6 +6145,7 @@ mod tests {
             RenderEffects::default(),
             0.012,
             5.0,
+            true,
             ShadowMode::HalfRes,
             true,
         );

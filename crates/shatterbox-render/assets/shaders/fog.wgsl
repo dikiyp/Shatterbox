@@ -35,6 +35,8 @@ struct Frame {
     debug_hit: vec4<f32>,
     // x = debris reactive mask (unused here), y = fog height falloff in metres.
     params4: vec4<f32>,
+    /// x = 1: trilinear probe sampling (default), 0: legacy nearest cell.
+    params5: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -69,6 +71,17 @@ fn probe_sun_visibility(p: vec3<f32>) -> f32 {
     let dims = vec3<f32>(textureDimensions(probe_tex));
     let size = max(frame.world_max.xyz - frame.world_min.xyz, vec3<f32>(1.0));
     let uvw = (p - frame.world_min.xyz) / size;
+    if (frame.params5.x > 0.5) {
+        // The probe volume is 8 m per cell. Nearest sampling made the sun
+        // visibility (and the interior mask derived from it) switch in hard
+        // 8 m squares around the camera, visible as a lit/dark box edge in fog.
+        // Trilinear filtering keeps the same data, so the boundary becomes a
+        // gradient instead of a step. The half-texel inset avoids sampling the
+        // clamped border on both sides.
+        let inset = 0.5 / dims;
+        let u = clamp(uvw, inset, vec3<f32>(1.0) - inset);
+        return clamp(textureSampleLevel(probe_tex, linear_sampler, u, 0.0).a, 0.0, 1.0);
+    }
     let cell = clamp(vec3<i32>(uvw * dims), vec3<i32>(0), vec3<i32>(dims) - vec3<i32>(1));
     return clamp(textureLoad(probe_tex, cell, 0).a, 0.0, 1.0);
 }
