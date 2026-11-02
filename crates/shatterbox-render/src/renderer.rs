@@ -34,6 +34,8 @@ use shatterbox_voxel::{
 use winit::event::WindowEvent;
 use winit::window::Window;
 
+use crate::smoke_gpu::{SMOKE_GRID, SmokeGpu, SmokeSource};
+
 const GBUFFER_ALBEDO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const GBUFFER_NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const GBUFFER_MATERIAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -44,7 +46,7 @@ const WORKGROUP: u32 = 8;
 const TIMESTAMP_READ_INTERVAL: u64 = 30;
 /// Two timestamps per measured pass. Pairs are independent: `total_ms` spans
 /// from the first G-buffer timestamp to the post-pass end.
-const TIMESTAMP_COUNT: u32 = 36;
+const TIMESTAMP_COUNT: u32 = 44;
 
 // Pass pairs, in submission order. The numeric order does not have to match,
 // but keeping it sequential makes the readback indices easy to audit.
@@ -73,6 +75,12 @@ const TS_DDGI_INJECT: u32 = 15;
 const TS_DDGI_UPDATE: u32 = 16;
 /// DDGI cosine convolution + hysteresis.
 const TS_DDGI_BLEND: u32 = 17;
+/// GPU smoke simulation (advect, divergence, Jacobi, project, advect state).
+const TS_SMOKE_SIM: u32 = 18;
+/// Half-res raymarch of the smoke volume.
+const TS_SMOKE_RENDER: u32 = 19;
+/// Depth-aware upsample of the smoke volume over the lit HDR image.
+const TS_SMOKE_COMPOSITE: u32 = 20;
 /// Largest internal framebuffer the tile pass allocates masks for: 4K/8 px.
 const DEBRIS_TILES_MAX: usize = (3840 / 8) * (2160 / 8);
 const MAX_LIGHTS: usize = 12;
@@ -707,6 +715,19 @@ pub struct RenderStats {
     pub ddgi_update_ms: f32,
     /// DDGI cosine convolution + hysteresis.
     pub ddgi_blend_ms: f32,
+    /// GPU smoke simulation (advect, divergence, Jacobi, project).
+    pub smoke_sim_ms: f32,
+    /// Half-resolution smoke raymarch.
+    pub smoke_render_ms: f32,
+    /// Depth-aware upsample of the smoke volume.
+    pub smoke_composite_ms: f32,
+    /// Smoke grid dimensions and Jacobi iteration count used this run.
+    pub smoke_grid: [u32; 3],
+    pub smoke_iterations: u32,
+    /// The local simulation box is alive this frame.
+    pub smoke_active: bool,
+    /// Emitters fed to the simulation on this frame.
+    pub smoke_sources: u32,
     pub total_ms: f32,
     pub scale: f32,
     pub internal_size: (u32, u32),
@@ -745,6 +766,13 @@ impl Default for RenderStats {
             ddgi_inject_ms: 0.0,
             ddgi_update_ms: 0.0,
             ddgi_blend_ms: 0.0,
+            smoke_sim_ms: 0.0,
+            smoke_render_ms: 0.0,
+            smoke_composite_ms: 0.0,
+            smoke_grid: [SMOKE_GRID.0, SMOKE_GRID.1, SMOKE_GRID.2],
+            smoke_iterations: 0,
+            smoke_active: false,
+            smoke_sources: 0,
             total_ms: 0.0,
             scale: 1.0,
             internal_size: (1, 1),
@@ -1211,6 +1239,9 @@ struct Targets {
     /// Half-resolution volumetric fog: rgb = inscatter, a = transmittance.
     fog: wgpu::Texture,
     fog_view: wgpu::TextureView,
+    /// Half-resolution dynamic smoke: rgb = in-scatter, a = transmittance.
+    smoke_vol: wgpu::Texture,
+    smoke_vol_view: wgpu::TextureView,
     /// Half-resolution voxel sun visibility (rgb = visibility, a = 1).
     shadow: wgpu::Texture,
     shadow_view: wgpu::TextureView,
@@ -1384,6 +1415,10 @@ pub struct Renderer {
     debris_rects_scratch: Vec<[f32; 4]>,
     world_mirror: WorldMirror,
     sampler: wgpu::Sampler,
+    /// Local GPU smoke simulation and its raymarch/composite passes.
+    smoke: SmokeGpu,
+    /// Sources collected by the game for the next simulation step.
+    smoke_sources: Vec<SmokeSource>,
 
     layouts: Layouts,
     pipelines: Pipelines,
@@ -1418,6 +1453,9 @@ pub struct Renderer {
     ddgi_inject_ms: f32,
     ddgi_update_ms: f32,
     ddgi_blend_ms: f32,
+    smoke_sim_ms: f32,
+    smoke_render_ms: f32,
+    smoke_composite_ms: f32,
     total_ms: f32,
     timestamps_valid: bool,
 
@@ -1882,6 +1920,15 @@ impl Renderer {
             scale,
             shadow_mode.is_full_res(),
         );
+        let mut smoke = SmokeGpu::new(&gpu.device);
+        smoke.bind_targets(
+            &gpu.device,
+            &uniform_buffer,
+            &targets.depth_view,
+            &targets.probe_view,
+            &targets.smoke_vol_view,
+            &sampler,
+        );
         let bind_groups = BindGroups::new(
             &gpu.device,
             &layouts,
@@ -2052,6 +2099,8 @@ impl Renderer {
             debris_rects_scratch: Vec::with_capacity(MAX_RENDER_DEBRIS),
             world_mirror,
             sampler,
+            smoke,
+            smoke_sources: Vec::new(),
             layouts,
             pipelines,
             targets,
@@ -2079,6 +2128,9 @@ impl Renderer {
             ddgi_inject_ms: 0.0,
             ddgi_update_ms: 0.0,
             ddgi_blend_ms: 0.0,
+            smoke_sim_ms: 0.0,
+            smoke_render_ms: 0.0,
+            smoke_composite_ms: 0.0,
             total_ms: 0.0,
             timestamps_valid: false,
             shader_watcher,
@@ -2176,6 +2228,37 @@ impl Renderer {
     pub fn set_particles(&mut self, particles: &[Particle]) {
         self.particles.clear();
         self.particles.extend_from_slice(particles);
+    }
+
+    /// Starts (or re-anchors) the local GPU smoke box. Resets the simulation and
+    /// uploads the obstacle mask built from voxel occupancy. `obstacles` is one
+    /// `0/1` word per cell in `SMOKE_GRID`, already dilated by the caller.
+    pub fn set_smoke_box(&mut self, queue: &wgpu::Queue, center: Vec3, obstacles: &[u32]) {
+        self.smoke.set_center(center);
+        self.smoke.upload_obstacles(queue, obstacles);
+    }
+
+    /// Rebuilds only the obstacle mask, keeping the density and velocity: this
+    /// is what lets a plume flow through a wall as soon as it is destroyed.
+    pub fn update_smoke_obstacles(&self, queue: &wgpu::Queue, obstacles: &[u32]) {
+        self.smoke.upload_obstacles(queue, obstacles);
+    }
+
+    /// Sources injected on the next simulation step (max 4).
+    pub fn set_smoke_sources(&mut self, sources: &[SmokeSource]) {
+        self.smoke_sources.clear();
+        self.smoke_sources.extend_from_slice(sources);
+    }
+
+    /// Stops the simulation and hides the volume. The billboard path remains.
+    pub fn clear_smoke_box(&mut self) {
+        self.smoke.active = false;
+        self.smoke_sources.clear();
+    }
+
+    #[must_use]
+    pub fn smoke_active(&self) -> bool {
+        self.smoke.active
     }
 
     /// Selects the sun shadow trace/upsample mode. Changing it re-allocates the
@@ -2927,6 +3010,13 @@ impl Renderer {
             ddgi_inject_ms: self.ddgi_inject_ms,
             ddgi_update_ms: self.ddgi_update_ms,
             ddgi_blend_ms: self.ddgi_blend_ms,
+            smoke_sim_ms: self.smoke_sim_ms,
+            smoke_render_ms: self.smoke_render_ms,
+            smoke_composite_ms: self.smoke_composite_ms,
+            smoke_grid: [SMOKE_GRID.0, SMOKE_GRID.1, SMOKE_GRID.2],
+            smoke_iterations: self.smoke.iterations,
+            smoke_active: self.smoke.active,
+            smoke_sources: self.smoke_sources.len() as u32,
             total_ms: self.total_ms,
             scale: self.scale,
             internal_size: self.targets.internal_size,
@@ -3029,6 +3119,8 @@ impl Renderer {
             bytemuck::cast_slice(&exposure_tail),
         );
         self.upload_particles(gpu);
+        self.smoke
+            .write_params(&gpu.queue, self.exposure_dt, self.time, &self.smoke_sources);
         self.upload_debris_tiles(gpu, camera, aspect);
     }
 
@@ -3173,6 +3265,10 @@ impl Renderer {
     /// the bloom blur. The caller adds the composite pass, so the same graph
     /// feeds the swapchain and the offscreen screenshot texture.
     fn encode_frame_graph(&mut self, encoder: &mut wgpu::CommandEncoder, queue: &wgpu::Queue) {
+        if self.smoke.active && self.effects.dynamic_smoke {
+            self.smoke
+                .encode_sim(encoder, self.query_set.as_ref(), Some(TS_SMOKE_SIM));
+        }
         // Any world or lighting change invalidates the probe history: retrace
         // the cycle without hysteresis instead of smearing the old room.
         if self.probe_dirty {
@@ -3309,6 +3405,14 @@ impl Renderer {
                 self.targets.gi_size,
             );
         }
+        if self.smoke.active && self.effects.dynamic_smoke {
+            self.smoke.encode_volume(
+                encoder,
+                Some(TS_SMOKE_RENDER),
+                self.targets.gi_size,
+                self.query_set.as_ref(),
+            );
+        }
         // Atlas written by the last blend dispatch above (the cursor already
         // points at the next slice).
         let ddgi_atlas = if self.effects.ddgi {
@@ -3335,6 +3439,15 @@ impl Renderer {
             &self.bind_groups.lighting,
             self.targets.internal_size,
         );
+        // Dynamic smoke volume sits between the lit scene and the billboard
+        // puffs: it is a participating medium, so it is composited first and
+        // the local explosion clouds draw on top of it.
+        if self.smoke.active && self.effects.dynamic_smoke {
+            let timestamps =
+                self.render_timestamp_writes(TS_SMOKE_COMPOSITE * 2, TS_SMOKE_COMPOSITE * 2 + 1);
+            self.smoke
+                .encode_composite(encoder, &self.targets.hdr_view, timestamps);
+        }
         // Smoke and dust are camera-facing billboards composited over the lit
         // HDR image: emitted after lighting (they are not traced geometry, so
         // they must not occlude anything in the G-buffer) and before
@@ -3654,6 +3767,13 @@ impl Renderer {
             ddgi_inject_ms: self.ddgi_inject_ms,
             ddgi_update_ms: self.ddgi_update_ms,
             ddgi_blend_ms: self.ddgi_blend_ms,
+            smoke_sim_ms: self.smoke_sim_ms,
+            smoke_render_ms: self.smoke_render_ms,
+            smoke_composite_ms: self.smoke_composite_ms,
+            smoke_grid: [SMOKE_GRID.0, SMOKE_GRID.1, SMOKE_GRID.2],
+            smoke_iterations: self.smoke.iterations,
+            smoke_active: self.smoke.active,
+            smoke_sources: self.smoke_sources.len() as u32,
             total_ms: self.total_ms,
             scale: self.scale,
             internal_size: self.targets.internal_size,
@@ -3896,6 +4016,14 @@ impl Renderer {
         // hysteresis so the new storage does not blend up from black.
         self.ddgi_slice = 0;
         self.ddgi_reset = true;
+        self.smoke.bind_targets(
+            &gpu.device,
+            &self.uniform_buffer,
+            &self.targets.depth_view,
+            &self.targets.probe_view,
+            &self.targets.smoke_vol_view,
+            &self.sampler,
+        );
     }
 
     fn update_governor(&mut self, dt: f32) {
@@ -4018,6 +4146,9 @@ impl Renderer {
             self.ddgi_inject_ms = pair(TS_DDGI_INJECT);
             self.ddgi_update_ms = pair(TS_DDGI_UPDATE);
             self.ddgi_blend_ms = pair(TS_DDGI_BLEND);
+            self.smoke_sim_ms = pair(TS_SMOKE_SIM);
+            self.smoke_render_ms = pair(TS_SMOKE_RENDER);
+            self.smoke_composite_ms = pair(TS_SMOKE_COMPOSITE);
             // Bloom spans prefilter + two blur passes; the intermediate pairs
             // are written too, so take the first begin and the last end.
             self.bloom_ms = ms(
@@ -4126,6 +4257,7 @@ impl Targets {
         let gi_size = ((internal.0 / 2).max(1), (internal.1 / 2).max(1));
         let (gi, gi_view) = make("Shatterbox gi", gi_size, HDR_FORMAT);
         let (fog, fog_view) = make("Shatterbox fog", gi_size, HDR_FORMAT);
+        let (smoke_vol, smoke_vol_view) = make("Shatterbox smoke volume", gi_size, HDR_FORMAT);
         let shadow_size = if shadow_full { internal } else { gi_size };
         let (shadow, shadow_view) = make(
             "Shatterbox shadow",
@@ -4239,6 +4371,8 @@ impl Targets {
             gi_view,
             fog,
             fog_view,
+            smoke_vol,
+            smoke_vol_view,
             shadow,
             shadow_view,
             light_shadow,

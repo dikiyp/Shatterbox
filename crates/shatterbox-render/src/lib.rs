@@ -4,8 +4,10 @@
 //! code supplies only the UI closure; it never touches `wgpu` types directly.
 
 mod renderer;
+mod smoke_gpu;
 
 pub use renderer::{
     AreaLight, CapturedFrame, DdgiQuality, DebrisView, FrameOutcome, MAX_DEBRIS_VOXELS,
     MAX_RENDER_DEBRIS, Particle, PointLight, RenderEffects, RenderStats, Renderer, ShadowMode,
 };
+pub use smoke_gpu::{SMOKE_GRID, SMOKE_HALF_EXTENTS, SMOKE_SPACING, SmokeSource};
