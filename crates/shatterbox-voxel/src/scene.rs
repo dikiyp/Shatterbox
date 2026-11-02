@@ -33,6 +33,9 @@ pub enum SceneKind {
     Studio,
     House,
     TestRoom,
+    /// FX laboratory: enclosed room, L-corridor, columned hall, 10 m shaft,
+    /// thin-wall light-leak pair, flammable courtyard and a blast room.
+    FxLab,
 }
 
 impl SceneKind {
@@ -42,6 +45,7 @@ impl SceneKind {
             "studio" => Some(Self::Studio),
             "house" => Some(Self::House),
             "testroom" | "test_room" => Some(Self::TestRoom),
+            "fx_lab" | "fxlab" => Some(Self::FxLab),
             _ => None,
         }
     }
@@ -61,6 +65,7 @@ impl SceneKind {
             Self::Studio => "studio",
             Self::House => "house",
             Self::TestRoom => "testroom",
+            Self::FxLab => "fx_lab",
         }
     }
 
@@ -70,6 +75,7 @@ impl SceneKind {
             Self::Studio => build_test_arena(),
             Self::House => build_house(),
             Self::TestRoom => build_test_room(),
+            Self::FxLab => build_fx_lab(),
         }
     }
 
@@ -84,6 +90,8 @@ impl SceneKind {
             // Inside the room, in the south-east corner, looking north along
             // the red (west) and blue (east) walls.
             Self::TestRoom => (Vec3::new(139.0, 20.0, ROOM_MAX_Z_M - 2.5), 0.0, -0.02),
+            // Courtyard, looking north at the wooden canopy.
+            Self::FxLab => (Vec3::new(125.0, 30.0, 139.5), 0.0, -0.03),
         }
     }
 }
@@ -699,6 +707,535 @@ pub fn test_room_bounds() -> (Vec3, Vec3) {
     )
 }
 
+// ---------------------------------------------------------------------------
+// FX laboratory scene
+// ---------------------------------------------------------------------------
+
+/// Ceiling lamps of the FX lab (world-space point-light positions).
+#[must_use]
+pub fn fx_lab_lamp_positions() -> [Vec3; 4] {
+    // Positions sit ~0.4 m below the emissive fixture: a light inside the
+    // fixture voxel starts every shadow ray and the whole lamp-shadow pass
+    // treats it as fully occluded (the first build had exactly that bug).
+    [
+        Vec3::new(105.0, 4.05, 104.0), // enclosed room
+        Vec3::new(112.0, 2.75, 104.5), // L-corridor
+        Vec3::new(104.0, 4.05, 124.0), // lit room of the thin-wall pair
+        Vec3::new(124.0, 4.55, 107.0), // columned hall
+    ]
+}
+
+/// Six test zones on the 64 m white plate, all built from palette materials:
+///
+/// 1. 8 x 6 m enclosed room (3.5 m high) with a red and a blue wall, white
+///    floor/ceiling, one window and a door into...
+/// 2. an L-shaped corridor that turns north, plus a roofed hall with two
+///    concrete columns.
+/// 3. a 3 x 3 x 10 m shaft with an open top and a low door.
+/// 4. two rooms separated by a single 12.5 cm voxel of wall: one lamp-lit, one
+///    sealed, for the light-leak test.
+/// 5. an outdoor courtyard with a wooden canopy on four posts, crates, barrels
+///    and a wooden plank floor (all `WOOD`, flammability 0.85).
+/// 6. a sealed concrete room whose west wall is meant to be blown open.
+pub fn build_fx_lab() -> VoxelWorld {
+    let mut world = VoxelWorld::new(studio_palette());
+
+    // Same 64 m plate as the other scenes, so every zone stands on real ground.
+    fill_box_vox(
+        &mut world,
+        IVec3::new(HOUSE_PLATE_MIN, FLOOR_TOP_VOXEL - 3, HOUSE_PLATE_MIN),
+        IVec3::new(HOUSE_PLATE_MAX, FLOOR_TOP_VOXEL, HOUSE_PLATE_MAX),
+        WHITE,
+        WHITE_TINT,
+    );
+
+    let floor = FLOOR_TOP_M;
+
+    // -- 1. Enclosed room: 8 x 6 m, 3.5 m high -------------------------------
+    // Red west wall, blue east wall, white south/north walls and ceiling.
+    fx_box(
+        &mut world,
+        100.75,
+        101.0,
+        floor,
+        4.5,
+        100.75,
+        107.25,
+        materials::RED_PAINT,
+        PAINT_TINT,
+    );
+    fx_box(
+        &mut world,
+        109.0,
+        109.25,
+        floor,
+        4.5,
+        100.75,
+        107.25,
+        materials::BLUE_PAINT,
+        PAINT_TINT,
+    );
+    fx_box(
+        &mut world, 101.0, 109.0, floor, 4.5, 100.75, 101.0, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 101.0, 109.0, floor, 4.5, 107.0, 107.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 100.75, 109.25, 4.5, 4.75, 100.75, 107.25, WHITE, WHITE_TINT,
+    );
+    // Window in the south wall (2 m wide, sill 1 m, head 2.2 m) and a door in
+    // the east wall into the corridor.
+    fx_box(
+        &mut world,
+        104.0,
+        106.0,
+        2.0,
+        3.2,
+        107.0,
+        107.25,
+        materials::AIR,
+        0,
+    );
+    fx_box(
+        &mut world,
+        109.0,
+        109.25,
+        floor,
+        3.0,
+        104.0,
+        105.0,
+        materials::AIR,
+        0,
+    );
+    // Ceiling lamp fixture (touches the ceiling, so it is anchored).
+    fx_box(
+        &mut world,
+        104.75,
+        105.25,
+        4.25,
+        4.5,
+        103.75,
+        104.25,
+        materials::EMISSIVE,
+        63,
+    );
+    // A 1.5 m wooden crate stack: enough fuel to keep the room filled with
+    // smoke for the full 15 s shot without touching the shell.
+    fx_box(
+        &mut world,
+        103.0,
+        104.5,
+        floor,
+        2.5,
+        103.0,
+        104.5,
+        materials::WOOD,
+        40,
+    );
+
+    // -- 2. L-corridor: east 7 m, then north 6.5 m ---------------------------
+    // East-west leg, interior z 103.5..105.5, ceiling 3.2 m.
+    fx_box(
+        &mut world, 109.0, 116.75, floor, 3.2, 105.5, 105.75, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 109.0, 114.5, floor, 3.2, 103.25, 103.5, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 109.0, 116.75, 3.2, 3.45, 103.25, 105.75, WHITE, WHITE_TINT,
+    );
+    // North leg, interior x 114.5..116.5, open at z = 97.
+    fx_box(
+        &mut world, 114.25, 114.5, floor, 3.2, 97.0, 103.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 116.5, 116.75, floor, 3.2, 97.0, 103.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 114.25, 116.75, 3.2, 3.45, 97.0, 103.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world,
+        111.75,
+        112.25,
+        2.95,
+        3.2,
+        104.25,
+        104.75,
+        materials::EMISSIVE,
+        63,
+    );
+
+    // -- 2b. Roofed hall with two columns -----------------------------------
+    // Outer walls 12 x 12 m, 5 m high; wide openings west (z 104..108) and
+    // south (x 122..126). Columns run from floor to ceiling.
+    fx_box(
+        &mut world, 118.0, 118.25, floor, 5.0, 101.0, 113.0, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 129.75, 130.0, floor, 5.0, 101.0, 113.0, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 118.0, 130.0, floor, 5.0, 101.0, 101.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 118.0, 130.0, floor, 5.0, 112.75, 113.0, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 118.0, 130.0, 5.0, 5.25, 101.0, 113.0, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world,
+        118.0,
+        118.25,
+        floor,
+        3.5,
+        104.0,
+        108.0,
+        materials::AIR,
+        0,
+    );
+    fx_box(
+        &mut world,
+        122.0,
+        126.0,
+        floor,
+        3.5,
+        112.75,
+        113.0,
+        materials::AIR,
+        0,
+    );
+    fx_box(
+        &mut world,
+        121.5,
+        122.25,
+        floor,
+        5.0,
+        105.0,
+        105.75,
+        materials::CONCRETE,
+        30,
+    );
+    fx_box(
+        &mut world,
+        126.0,
+        126.75,
+        floor,
+        5.0,
+        110.0,
+        110.75,
+        materials::CONCRETE,
+        30,
+    );
+    fx_box(
+        &mut world,
+        123.75,
+        124.25,
+        4.75,
+        5.0,
+        106.75,
+        107.25,
+        materials::EMISSIVE,
+        63,
+    );
+
+    // Wooden pallet on the floor between the west opening and the first
+    // column: the flame scenario lights it and the plume has to wrap around
+    // the column.
+    fx_box(
+        &mut world,
+        120.25,
+        121.2,
+        floor,
+        1.9,
+        106.0,
+        106.9,
+        materials::WOOD,
+        36,
+    );
+
+    // -- 3. Shaft: 3 x 3 m, 10 m tall, open top, low door --------------------
+    fx_box(
+        &mut world,
+        131.75,
+        132.0,
+        floor,
+        11.0,
+        100.75,
+        104.25,
+        materials::CONCRETE,
+        28,
+    );
+    fx_box(
+        &mut world,
+        135.0,
+        135.25,
+        floor,
+        11.0,
+        100.75,
+        104.25,
+        materials::CONCRETE,
+        28,
+    );
+    fx_box(
+        &mut world,
+        132.0,
+        135.0,
+        floor,
+        11.0,
+        100.75,
+        101.0,
+        materials::CONCRETE,
+        28,
+    );
+    fx_box(
+        &mut world,
+        132.0,
+        135.0,
+        floor,
+        11.0,
+        104.0,
+        104.25,
+        materials::CONCRETE,
+        28,
+    );
+    fx_box(
+        &mut world,
+        132.75,
+        134.0,
+        floor,
+        2.5,
+        104.0,
+        104.25,
+        materials::AIR,
+        0,
+    );
+    // Wooden pallet at the bottom of the shaft: a contained smoke source that
+    // does not blow a hole through the 0.375 m plate.
+    fx_box(
+        &mut world,
+        133.0,
+        133.9,
+        floor,
+        1.9,
+        102.0,
+        102.9,
+        materials::WOOD,
+        36,
+    );
+
+    // -- 4. Thin-wall pair: lit room | one voxel | dark room -----------------
+    // Lit room x 101..107, dark room x 107.25..113, both z 121..127, 3.5 m.
+    fx_box(
+        &mut world, 100.75, 101.0, floor, 4.5, 120.75, 127.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 113.0, 113.25, floor, 4.5, 120.75, 127.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 101.0, 113.0, floor, 4.5, 120.75, 121.0, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 101.0, 113.0, floor, 4.5, 127.0, 127.25, WHITE, WHITE_TINT,
+    );
+    fx_box(
+        &mut world, 100.75, 113.25, 4.5, 4.75, 120.75, 127.25, WHITE, WHITE_TINT,
+    );
+    // Window in the lit room only.
+    fx_box(
+        &mut world,
+        100.75,
+        101.0,
+        2.0,
+        3.2,
+        123.0,
+        125.0,
+        materials::AIR,
+        0,
+    );
+    // The divider is exactly one voxel (12.5 cm), no mortar, no relief.
+    fill_box_vox(
+        &mut world,
+        IVec3::new(856, FLOOR_TOP_VOXEL, 968),
+        IVec3::new(857, 36, 1016),
+        materials::CONCRETE,
+        40,
+    );
+    fx_box(
+        &mut world,
+        103.75,
+        104.25,
+        4.25,
+        4.5,
+        123.75,
+        124.25,
+        materials::EMISSIVE,
+        63,
+    );
+
+    // -- 5. Outdoor courtyard: canopy, crates, barrels, wooden floor --------
+    // One-voxel concrete patio over the plate (supported by it).
+    fill_box_vox(
+        &mut world,
+        IVec3::new(944, FLOOR_TOP_VOXEL, 1048),
+        IVec3::new(1056, FLOOR_TOP_VOXEL + 1, 1128),
+        materials::CONCRETE,
+        26,
+    );
+    let patio = 1.125;
+    // Four posts and a wooden roof at 3 m.
+    for (x, z) in [
+        (119.5, 132.5),
+        (129.25, 132.5),
+        (119.5, 138.5),
+        (129.25, 138.5),
+    ] {
+        fx_box(
+            &mut world,
+            x,
+            x + 0.25,
+            patio,
+            3.0,
+            z,
+            z + 0.25,
+            materials::WOOD,
+            38,
+        );
+    }
+    fx_box(
+        &mut world,
+        119.25,
+        129.75,
+        3.0,
+        3.25,
+        132.25,
+        138.75,
+        materials::WOOD,
+        42,
+    );
+    // Crate stack: one 1.2 m crate and a smaller one beside it.
+    fx_box(
+        &mut world,
+        121.5,
+        123.0,
+        patio,
+        2.325,
+        134.0,
+        135.5,
+        materials::WOOD,
+        36,
+    );
+    fx_box(
+        &mut world,
+        123.25,
+        124.25,
+        patio,
+        2.125,
+        134.25,
+        135.25,
+        materials::WOOD,
+        44,
+    );
+    // Two barrels (square-ish, 1.25 m tall, darker tint).
+    fx_box(
+        &mut world,
+        126.0,
+        127.0,
+        patio,
+        2.375,
+        133.0,
+        134.0,
+        materials::WOOD,
+        24,
+    );
+    fx_box(
+        &mut world,
+        127.0,
+        128.0,
+        patio,
+        2.375,
+        136.0,
+        137.0,
+        materials::WOOD,
+        28,
+    );
+    // Loose wooden plank floor, one voxel thick.
+    fx_box(
+        &mut world,
+        124.0,
+        128.0,
+        patio,
+        patio + 0.125,
+        135.0,
+        137.0,
+        materials::WOOD,
+        32,
+    );
+
+    // -- 6. Blast room: sealed concrete box, west wall is the target --------
+    // Interior x 134..141.75, z 121..129, 3 m high; no openings and no lamp,
+    // so daylight only enters once the west wall is opened.
+    fx_box(
+        &mut world,
+        133.75,
+        134.0,
+        floor,
+        4.0,
+        120.75,
+        129.25,
+        materials::CONCRETE,
+        30,
+    );
+    fx_box(
+        &mut world,
+        141.75,
+        142.0,
+        floor,
+        4.0,
+        120.75,
+        129.25,
+        materials::CONCRETE,
+        30,
+    );
+    fx_box(
+        &mut world,
+        134.0,
+        141.75,
+        floor,
+        4.0,
+        120.75,
+        121.0,
+        materials::CONCRETE,
+        30,
+    );
+    fx_box(
+        &mut world,
+        134.0,
+        141.75,
+        floor,
+        4.0,
+        129.0,
+        129.25,
+        materials::CONCRETE,
+        30,
+    );
+    fx_box(
+        &mut world,
+        133.75,
+        142.0,
+        4.0,
+        4.25,
+        120.75,
+        129.25,
+        materials::CONCRETE,
+        30,
+    );
+
+    world
+}
+
 #[derive(Clone, Copy)]
 enum WallFace {
     South,
@@ -847,6 +1384,29 @@ fn fill_box_vox(world: &mut VoxelWorld, min: IVec3, max: IVec3, material: u16, t
 
 fn fill_box_m(world: &mut VoxelWorld, min: Vec3, max: Vec3, material: u16, tint: u8) {
     fill_box_vox(world, vox_min(min), vox_max(max), material, tint);
+}
+
+/// Axis-aligned box from metre extents. Extents are expected to land on the
+/// 12.5 cm grid; `fill_box_m` floors the min and ceils the max.
+#[allow(clippy::too_many_arguments)]
+fn fx_box(
+    world: &mut VoxelWorld,
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    z0: f32,
+    z1: f32,
+    material: u16,
+    tint: u8,
+) {
+    fill_box_m(
+        world,
+        Vec3::new(x0, y0, z0),
+        Vec3::new(x1, y1, z1),
+        material,
+        tint,
+    );
 }
 
 /// Camera spawn for the test arena, facing the screens to the north.
@@ -1222,6 +1782,49 @@ mod tests {
         assert!(
             spawn.x > 128.0 && spawn.x < 144.0 && spawn.z > 128.0 && spawn.z < 144.0,
             "spawn {spawn} is outside the room"
+        );
+    }
+
+    #[test]
+    fn fx_lab_scene_kind_round_trips() {
+        assert_eq!(SceneKind::parse("fx_lab"), Some(SceneKind::FxLab));
+        assert_eq!(SceneKind::parse("FXLab"), Some(SceneKind::FxLab));
+        assert_eq!(SceneKind::FxLab.name(), "fx_lab");
+    }
+
+    #[test]
+    fn fx_lab_is_anchored_and_has_burnables() {
+        let world = build_fx_lab();
+        // Every prop hangs off the plate, a wall or the ceiling; the no-floating
+        // assert in the scenarios would otherwise fail the whole part-1 harness.
+        let (floating, total) = world.count_unanchored_above(GROUND_ANCHOR_VOXEL);
+        assert_eq!(
+            floating, 0,
+            "{floating} of {total} fx_lab voxels are disconnected"
+        );
+        assert!(total > 30_000, "fx_lab appears to be empty: {total}");
+        // The crate inside the enclosed room and the courtyard props must use
+        // the flammable wood material, otherwise fire_spread/fire_night have
+        // nothing to burn.
+        assert_eq!(
+            world.voxel(830, 10, 830).material(),
+            materials::WOOD,
+            "room crate is not wood"
+        );
+        assert_eq!(
+            world.voxel(966, 10, 851).material(),
+            materials::WOOD,
+            "hall pallet is not wood"
+        );
+        assert_eq!(
+            world.voxel(1067, 10, 819).material(),
+            materials::WOOD,
+            "shaft pallet is not wood"
+        );
+        assert_eq!(
+            world.voxel(978, 11, 1078).material(),
+            materials::WOOD,
+            "courtyard crate is not wood"
         );
     }
 }

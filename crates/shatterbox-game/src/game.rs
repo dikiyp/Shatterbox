@@ -15,7 +15,8 @@ use shatterbox_render::{
     Particle, PointLight, RenderEffects, RenderStats, Renderer, ShadowMode,
 };
 use shatterbox_voxel::scene::{
-    GROUND_ANCHOR_VOXEL, SceneKind, house_lamp_positions, test_room_lamp_positions,
+    GROUND_ANCHOR_VOXEL, SceneKind, fx_lab_lamp_positions, house_lamp_positions,
+    test_room_lamp_positions,
 };
 use shatterbox_voxel::{Voxel, VoxelWorld, materials};
 use winit::event::{DeviceEvent, WindowEvent};
@@ -822,6 +823,27 @@ fn test_room_lights() -> Vec<PointLight> {
         });
     }
     lights
+}
+
+/// FX lab: one lamp per interior zone, warm. Four of twelve slots are used, so
+/// muzzle flashes and fire lights have room. The blast room and the shaft are
+/// deliberately unlit: daylight must enter them through the opening the
+/// scenario makes.
+fn fx_lab_lights() -> Vec<PointLight> {
+    // (intensity, radius): enclosed room, corridor, lit room, hall. The lab is
+    // a test scene, so the fixtures are deliberately strong enough to read the
+    // smoke and columns at noon without daylight help.
+    const RIG: [(f32, f32); 4] = [(20.0, 9.0), (15.0, 8.0), (25.0, 10.0), (40.0, 16.0)];
+    fx_lab_lamp_positions()
+        .into_iter()
+        .zip(RIG)
+        .map(|(position, (intensity, radius))| PointLight {
+            position: position.to_array(),
+            radius,
+            color: [1.0, 0.88, 0.72],
+            intensity,
+        })
+        .collect()
 }
 
 impl Game {
@@ -2768,6 +2790,7 @@ impl App for Game {
                     SceneKind::Studio => studio_lights(),
                     SceneKind::House => house_lights(),
                     SceneKind::TestRoom => test_room_lights(),
+                    SceneKind::FxLab => fx_lab_lights(),
                 };
                 renderer.set_lights(&self.lights);
                 self.area_lights = match self.scene {
@@ -2792,6 +2815,7 @@ impl App for Game {
                     ],
                     SceneKind::House => Vec::new(),
                     SceneKind::TestRoom => Vec::new(),
+                    SceneKind::FxLab => Vec::new(),
                 };
                 renderer.set_area_lights(&self.area_lights);
                 let hours = std::env::var("SHATTERBOX_TIME")
